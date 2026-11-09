@@ -9,7 +9,7 @@
 # Put it behind HTTPS (any reverse proxy or platform load balancer). It listens on $PORT, or 8080.
 
 # Base images are pinned by digest (a moved tag can't change what is built); Dependabot proposes updates.
-FROM node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202 AS web
+FROM node:26-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
