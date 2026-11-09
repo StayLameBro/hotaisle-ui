@@ -8,8 +8,7 @@ on:
 permissions:
   contents: read
 
-# Third-party actions are pinned to exact commits (a moved tag can't change what runs);
-# Dependabot proposes updates.
+# Third-party actions are pinned to exact commits, so a moved tag can't change what runs.
 jobs:
   test:
     runs-on: ubuntu-latest
