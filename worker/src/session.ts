@@ -13,6 +13,8 @@ export type Session = {
   kind?: 'key' | 'email' | 'passkey';
   /** Whose records these are: a hash of the account's email. */
   account?: string;
+  /** When Hot Aisle stops accepting the token (ms since 1970). Email sessions last about 20 minutes and are renewed. */
+  tokenExp?: number;
   /** An email sign-in waiting for its link to be opened. */
   pending?: { ticket: string; email: string; expires_at: string };
   /** When this session stops being accepted (ms since 1970). */
@@ -83,6 +85,7 @@ export async function readSession(req: Request, secret: string): Promise<Session
   if (!v) return undefined;
   const s = await open<Session>(await deriveKey(secret, 'session'), v);
   if (!s || s.v !== 1 || !(s.exp > Date.now())) return undefined;
+  if (s.tokenExp && s.tokenExp <= Date.now()) return undefined; // Hot Aisle's session has ended: sign in again
   return s;
 }
 

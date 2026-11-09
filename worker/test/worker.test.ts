@@ -1,7 +1,6 @@
-import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
+import { runInDurableObject } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import type { RecordsState } from '../../shared/records';
 import { accountId } from '../src/session';
 
 const ORIGIN = 'https://ui.test';
@@ -116,21 +115,24 @@ describe('sign-in with an email link', () => {
     expect(calls).toContain('POST /user/email/complete/ -');
   });
 
-  it('auto-ends with the email session, sent as X-Session-Key', async () => {
+  it('renews the session as it is used, and switches to the new key', async () => {
     const b = browser();
     await b.call('POST', '/auth/email/start', { email: 'dave@example.com' });
     await env.UPSTREAM!.fetch('https://api.test/api/__open?email=dave%40example.com');
     expect(JSON.parse((await b.call('POST', '/auth/email/wait')).text).done).toBe(true);
-    await b.call('POST', '/records/machines', { team: 'lab', name: 'vm-d', launched: true, release_in_minutes: 60 });
-    const stub = env.ACCOUNTS.get(env.ACCOUNTS.idFromName(await accountId('dave@example.com')));
-    await runInDurableObject(stub, async (_o, state) => {
-      const s = (await state.storage.get<RecordsState>('records'))!;
-      s.machines['lab/vm-d'].release_at = new Date(Date.now() - 1000).toISOString();
-      await state.storage.put('records', s);
-      await state.storage.setAlarm(Date.now() + 3600_000);
-    });
-    expect(await runDurableObjectAlarm(stub)).toBe(true);
-    expect((await upstreamCalls()).some((c) => c.startsWith('DELETE /teams/lab/virtual_machines/vm-d/ session:sess-'))).toBe(true);
+    const keyIn = async () => {
+      await b.call('GET', '/api/teams/lab/whoami/');
+      return (await upstreamCalls()).filter((c) => c.startsWith('GET /teams/lab/whoami/')).pop()!;
+    };
+    const first = await keyIn();
+    // the session gets near its end: Hot Aisle answers the next call with a new key
+    await env.UPSTREAM!.fetch('https://api.test/api/__expire?email=dave%40example.com&in=30');
+    const renewing = await b.call('GET', '/api/teams/lab/whoami/');
+    expect(renewing.setCookie).toMatch(/HttpOnly/);
+    expect(renewing.text).not.toContain('sess-');
+    const after = await keyIn();
+    expect(after).toMatch(/ session:sess-/);
+    expect(after).not.toBe(first);
   });
 
   it('never signs in from an unapproved link', async () => {
@@ -145,7 +147,7 @@ describe('sign-in with an email link', () => {
   });
 });
 
-describe('records and auto-end', () => {
+describe('records', () => {
   it('keeps each account’s records apart', async () => {
     const alice = browser();
     const bob = browser();
@@ -156,29 +158,15 @@ describe('records and auto-end', () => {
     expect((await bob.call('GET', '/records/machines?team=lab')).text).not.toContain('vm-a');
   });
 
-  it('ends a machine on time with its owner’s token, records it, then forgets the token', async () => {
+  it('stores no logins on the server: only launch records and history', async () => {
     const b = browser();
     await b.call('POST', '/auth/key', { key: 'tok-alice' });
-    await b.call('POST', '/records/machines', { team: 'lab', name: 'vm9', launched: true, gpus: '1× MI300X', price_cents: 299, release_in_minutes: 60 });
+    await b.call('POST', '/records/machines', { team: 'lab', name: 'vm9', launched: true, gpus: '1× MI300X', price_cents: 299 });
+    await b.call('POST', '/records/history', { team: 'lab', name: 'vm8', gpus: '1× MI300X', ended_at: new Date().toISOString() });
     const stub = env.ACCOUNTS.get(env.ACCOUNTS.idFromName(await accountId('alice@example.com')));
-    // the token is kept for the timer, encrypted
     await runInDurableObject(stub, async (_o, state) => {
-      const sealed = await state.storage.get<string>('token');
-      expect(sealed).toBeTruthy();
-      expect(sealed).not.toContain('tok-alice');
-      // bring the timer due
-      const s = (await state.storage.get<RecordsState>('records'))!;
-      s.machines['lab/vm9'].release_at = new Date(Date.now() - 1000).toISOString();
-      await state.storage.put('records', s);
-      await state.storage.setAlarm(Date.now() + 3600_000); // run below, on demand
-    });
-    expect(await runDurableObjectAlarm(stub)).toBe(true);
-    expect(await upstreamCalls()).toContain('DELETE /teams/lab/virtual_machines/vm9/ key:tok-alice');
-    expect((await b.call('GET', '/records/machines?team=lab')).text).not.toContain('vm9');
-    const history = JSON.parse((await b.call('GET', '/records/history?team=lab')).text);
-    expect(history[0]).toMatchObject({ name: 'vm9', ended_by: 'auto-end', minimum_applied: true });
-    await runInDurableObject(stub, async (_o, state) => {
-      expect(await state.storage.get('token')).toBeUndefined();
+      expect([...(await state.storage.list()).keys()]).toEqual(['records']);
+      expect(JSON.stringify(await state.storage.get('records'))).not.toContain('tok-alice');
       expect(await state.storage.getAlarm()).toBeNull();
     });
   });

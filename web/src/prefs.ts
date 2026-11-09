@@ -8,13 +8,12 @@ export type Prefs = {
   image: Image;
   customURL: string;
   notify: boolean; // desktop notification when a machine is ready
-  releaseAfter: number; // minutes; 0 = never
   sound: boolean; // soft key clicks and a chime when a machine is ready
   theme: Theme;
 };
 
 const KEY = 'hotaisle-ui:prefs';
-const DEFAULTS: Prefs = { gpus: 1, image: 'standard', customURL: '', notify: false, releaseAfter: 0, sound: true, theme: 'system' };
+const DEFAULTS: Prefs = { gpus: 1, image: 'standard', customURL: '', notify: false, sound: true, theme: 'system' };
 
 function read(): Prefs {
   try {
@@ -61,10 +60,3 @@ export const IMAGES: Record<Image, { name: string; note: string }> = {
   custom: { name: 'My cloud-init', note: 'Runs your user-data file on first boot. Takes a few extra minutes.' },
 };
 
-export const RELEASE_CHOICES: { min: number; label: string }[] = [
-  { min: 0, label: 'Never' },
-  { min: 60, label: '1 h' },
-  { min: 120, label: '2 h' },
-  { min: 240, label: '4 h' },
-  { min: 480, label: '8 h' },
-];

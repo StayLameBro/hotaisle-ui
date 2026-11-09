@@ -21,7 +21,7 @@
   "cloudflare": {
     "bindings": {
       "SESSION_SECRET": {
-        "description": "Encrypts sign-in sessions and the tokens kept for auto-end. 32 or more random characters: `openssl rand -base64 32`."
+        "description": "Encrypts sign-in sessions. 32 or more random characters: `openssl rand -base64 32`."
       }
     }
   }

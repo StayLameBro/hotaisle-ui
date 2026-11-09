@@ -3,7 +3,7 @@
 //
 // Runs the real binary in sample-data mode, drives it in headless Chrome over the DevTools protocol
 // (no packages needed), and walks every interaction a person makes: picking sizes, menus, launching,
-// booting to ready, copying the SSH command, auto-end, ending, receipts, settings, credits. After each
+// booting to ready, copying the SSH command, ending, receipts, settings, credits. After each
 // step that should leave the layout alone it checks two things:
 //   1. the browser's own layout-shift entries (the Cumulative Layout Shift signal), and
 //   2. the boxes of the elements people look at (cards, the SSH row, the copy button, meters, header,
@@ -356,11 +356,6 @@ async function run(viewport) {
   }, { expect: '.opt:nth-child(1)[aria-checked="true"], .opt:nth-child(1).on' });
   await step('open the image menu', () => click('.details .picker:nth-child(1) .picker-btn'), { settle: 350, expect: '.picker-menu' });
   await step('close it', () => key('Escape'), { settle: 350, gone: '.picker-menu' });
-  await step('choose an auto-end', async () => {
-    await click('.details .picker:nth-child(2) .picker-btn');
-    await waitFor('.picker-menu > button:nth-child(3)');
-    await click('.picker-menu > button:nth-child(3)');
-  }, { gone: '.picker-menu' });
   await step('hover the drawing', async () => {
     await hover('.plate');
     await sleep(200);
@@ -378,11 +373,6 @@ async function run(viewport) {
   await step('the copy label returns', async () => {}, { settle: 1800 });
   await step('open More', () => click('.trip .menu-wrap > .btn'), { settle: 350, expect: '.trip .menu' });
   await step('close it', () => key('Escape'), { settle: 350, gone: '.trip .menu' });
-  await step('set auto-end on the machine', async () => {
-    await click('.trip .sub-act .btn-text');
-    await waitFor('.sheet .choice button:nth-child(2)');
-    await click('.sheet .choice button:nth-child(2)');
-  }, { gone: '.sheet' });
   await step('open End', () => click('.trip .btn.end'), { settle: 400, expect: '.sheet' });
   await step('cancel it', () => click('.sheet-x'), { settle: 400, gone: '.sheet' });
   await step('a minute of running', async () => {}, { settle: 2500 });

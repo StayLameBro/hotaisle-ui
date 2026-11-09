@@ -1,10 +1,10 @@
-// Calls to the Hot Aisle API made by the Worker itself (sign-in, and auto-end while nobody is looking).
+// Calls to the Hot Aisle API made by the Worker itself (sign-in).
 // Everything the page asks for goes through the proxy in index.ts instead.
 
 export type Env = {
   ASSETS: Fetcher;
   ACCOUNTS: DurableObjectNamespace;
-  /** At least 32 random characters. Encrypts session cookies and tokens kept for auto-end. A Worker secret. */
+  /** At least 32 random characters. Encrypts session cookies. A Worker secret. */
   SESSION_SECRET: string;
   /** Default https://admin.hotaisle.app/api */
   API_BASE?: string;

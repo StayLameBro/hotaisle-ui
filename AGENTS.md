@@ -25,10 +25,10 @@ Node 20+. The Worker serves `web/dist` as static assets, so run `npm run build` 
 | `wrangler.jsonc` | the Worker: static assets, the `Account` Durable Object, vars |
 | `worker/src/index.ts` | routes, the guard, sign-in (`/auth/*`), the API proxy (`/api/*`), records (`/records/*`) |
 | `worker/src/session.ts` | the session cookie: AES-GCM, keys derived from `SESSION_SECRET` |
-| `worker/src/account.ts` | one Durable Object per account: records, history, auto-end alarms |
+| `worker/src/account.ts` | one Durable Object per account: launch records and history (no logins) |
 | `worker/src/hotaisle.ts` | calls the Worker itself makes to Hot Aisle; the email sign-in adapter |
 | `worker/dev/fake-api.mjs` | a stand-in Hot Aisle API for tests and `npm run dev:fake` |
-| `shared/records.ts` | records, history and auto-end logic, shared by the Worker and sample data |
+| `shared/records.ts` | records and history logic, shared by the Worker and sample data |
 | `web/src/api.ts` | every call the app makes; sends them to sample data when that's on |
 | `web/src/demo/api.ts` | sample data: an in-browser copy of the API and of `/records` |
 | `web/src/Connect.tsx` | the sign-in screen (email link, API key, sample data) |
@@ -53,21 +53,26 @@ its expiry in `X-Session-Key-Expires`, or 401. All of it is in `worker/src/hotai
 **Passkeys.** Not in the API yet. They would add `/auth/passkey/*` routes that relay the WebAuthn ceremony to Hot
 Aisle and store the resulting token in the session, the same way email sign-in does.
 
-**Auto-end.** The Account Durable Object ends machines with the token it was last used with. If session tokens expire
-before a timer fires, the timer can't end the machine (it retries every minute and shows why on the card). A release
-time on the machine in Hot Aisle's API would remove that dependency.
+**Staying signed in.** Email sessions last 20 minutes. With under a minute left, Hot Aisle answers any authenticated
+call with `X-New-Session-Key` and `X-Session-Key-Expires`; the proxy switches the session cookie to the new key when its
+expiry is at least the current one's, so an older answer arriving late can't undo it. The old key keeps working until
+its own expiry. The app calls the API at least every 15 seconds while it's open, so no separate keep-alive is needed.
+
+**No auto-end, on purpose.** Hot Aisle's API has no scheduled shutdown, and an app-side timer could miss one (an
+outage, an expired or revoked session) and leave a machine billing. Don't add one back unless the API itself can take
+a shutdown time.
 
 ## Rules that must hold
 
 Money:
-- **Ending a machine must really end it.** Auto-end (`fireTimers` in `shared/records.ts`) releases VMs through
-  `virtual_machines/{name}/` and bare metal through `bare_metal/{name}/?force=true`; a 404 counts as already gone. Any
-  other failure retries every minute and shows the error on the machine. Never treat a failure as success.
+- **Ending a machine must really end it.** End releases a VM through `DELETE virtual_machines/{name}/` (shutting it
+  down doesn't stop billing; releasing does, and deletes its data) and bare metal through `bare_metal/{name}/`. Say so
+  before the person confirms. Never show a failure as success.
 - Minimum charges: 30 minutes for a VM, 8 hours for bare metal. Estimates and receipts apply them.
 
 Keys and privacy:
 - A token never reaches the page: not in a response body, a URL, or a readable cookie. It is only ever in the
-  encrypted session cookie, or encrypted in the account's Durable Object while an auto-end timer is pending.
+  encrypted session cookie. Nothing stores logins on the server.
 - Never log tokens, emails or claim tickets. Durable Objects are named by a hash of the email, not the email.
 - The guard stays: `X-Requested-With: hotaisle-ui` on `/auth`, `/api`, `/records`, same-origin only,
   `SameSite=Strict` cookie, strict CSP.

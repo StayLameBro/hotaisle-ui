@@ -486,7 +486,7 @@ kbd { display: inline-grid; place-items: center; min-width: 22px; height: 22px; 
 /* receipt: the same frame, with what it ran and cost */
 .receipt .summary { display: flex; align-items: center; padding: 0 16px; border-radius: 12px; background: var(--card-2); color: var(--ink-2); font-size: 13.5px; }
 
-/* sheets inside a card: end, auto-end, rebuild. They cover the lower card, so the card never resizes. */
+/* sheets inside a card: end, rebuild. They cover the lower card, so the card never resizes. */
 .sheet {
   position: absolute; left: 10px; right: 10px; bottom: 10px; top: 90px; z-index: 2; padding: 16px; border-radius: 14px;
   background: var(--card); box-shadow: 0 0 0 1px var(--line-2), 0 -10px 30px -18px rgb(0 0 0 / 35%);

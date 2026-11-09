@@ -1,5 +1,5 @@
 import { api, type Status, type Team } from './api';
-import { IMAGES, RELEASE_CHOICES, usePrefs, type Image, type Theme } from './prefs';
+import { IMAGES, usePrefs, type Image, type Theme } from './prefs';
 
 function Seg<T extends string | number>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
   return (
@@ -50,10 +50,6 @@ export function SettingsView({ status, teams, team, onTeam, onDemo }: { status: 
             <input id="def-url" type="url" placeholder="https://…" value={p.customURL} onChange={(e) => set({ customURL: e.target.value })} />
           </div>
         )}
-        <div className="field">
-          <span className="field-l">Auto-end</span>
-          <Seg label="Default auto-end" value={p.releaseAfter} onChange={(v) => set({ releaseAfter: v })} options={RELEASE_CHOICES.map((c) => ({ value: c.min, label: c.min ? c.label : 'Off' }))} />
-        </div>
       </section>
 
       <section className="group">

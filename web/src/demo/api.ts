@@ -9,7 +9,6 @@ import {
   addEnded,
   checkUpdate,
   emptyRecords,
-  fireTimers,
   historyOf,
   listMachines,
   pruneMachines,
@@ -173,10 +172,6 @@ async function fingerprint(b64: string) {
 export async function demoFetch(method: string, rawPath: string, body?: unknown): Promise<DemoResponse> {
   const s = load();
   tick(s);
-  await fireTimers(s.records, async (path) => {
-    const r = await route(s, 'DELETE', '/api' + path, undefined);
-    return { status: r.status, message: r.text ?? '' };
-  });
   await new Promise((r) => setTimeout(r, 120)); // a little network feel, so loading states show
   const r = await route(s, method, rawPath, body);
   save();

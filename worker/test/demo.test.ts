@@ -38,12 +38,12 @@ describe('sample data', () => {
     expect(((await demoFetch('GET', `${T}/bare_metal/available/`)).body as { Quantity: number }[])[0].Quantity).toBe(1);
   });
 
-  it('keeps records and ends machines on their timers, like the real backend', async () => {
+  it('keeps launch records, like the real backend', async () => {
     await demoFetch('POST', '/api/user/ssh_keys/', { authorized_key: KEY });
     const v = (await demoFetch('POST', `${T}/virtual_machines/`, { gpus: [{ count: 1 }] })).body as { name: string };
-    expect((await demoFetch('POST', '/records/machines', { team: 'demo-lab', name: v.name, launched: true, release_in_minutes: 60 })).status).toBe(200);
-    const list = (await demoFetch('GET', '/records/machines?team=demo-lab')).body as { name: string; release_at?: string }[];
+    expect((await demoFetch('POST', '/records/machines', { team: 'demo-lab', name: v.name, launched: true })).status).toBe(200);
+    const list = (await demoFetch('GET', '/records/machines?team=demo-lab')).body as { name: string; launched_at?: string }[];
     expect(list[0]).toMatchObject({ name: v.name });
-    expect(list[0].release_at).toBeTruthy();
+    expect(list[0].launched_at).toBeTruthy();
   });
 });

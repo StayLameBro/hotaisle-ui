@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, APIError, type Balance, type Offer, type SSHKey, type Team, type VM } from './api';
 import { gb, hbm, hoursOr, keyLabel, money } from './format';
-import { IMAGES, RELEASE_CHOICES, VLLM_URL, type Image } from './prefs';
+import { IMAGES, VLLM_URL, type Image } from './prefs';
 import type { Signal } from './signal';
 import { sound } from './sound';
 import { HoldButton, Picker, useToast } from './ui';
 
-export type Order = { count: number; image: Image; customURL: string; releaseAfter: number };
-export type LaunchMeta = { image: Image; price?: number; releaseAfter: number };
+export type Order = { count: number; image: Image; customURL: string };
+export type LaunchMeta = { image: Image; price?: number };
 
 const PLACEHOLDER = [1, 2, 4, 8];
 
@@ -52,7 +52,7 @@ export function OrderView({
   const toast = useToast();
   const sizes = useMemo(() => sizesOf(offers), [offers]);
   const [busy, setBusy] = useState(false);
-  const { count, image, customURL, releaseAfter } = order;
+  const { count, image, customURL } = order;
 
   // Fall back to the nearest size in stock when the preferred one is gone.
   useEffect(() => {
@@ -102,7 +102,7 @@ export function OrderView({
     setBusy(true);
     try {
       const vm = offer.metal ? await api.reserve(team.handle, offer) : await api.provision(team.handle, [{ count: g.count, manufacturer: g.manufacturer, model: g.model }], userData || undefined);
-      onLaunched(vm, { image: offer.metal ? 'standard' : image, price, releaseAfter });
+      onLaunched(vm, { image: offer.metal ? 'standard' : image, price });
     } catch (e) {
       const err = e as APIError;
       const known: Record<number, string> = {
@@ -177,16 +177,6 @@ export function OrderView({
             ) : undefined
           }
         />
-        <Picker<number>
-          label="Auto-end"
-          value={releaseAfter}
-          onChange={(v) => setOrder({ releaseAfter: v })}
-          options={RELEASE_CHOICES.map((c) => ({
-            value: c.min,
-            label: c.min ? `After ${c.min / 60} hour${c.min === 60 ? '' : 's'}` : 'Off',
-            hint: c.min ? (price ? `About ${money((price * c.min) / 60)} in total` : undefined) : 'Runs until you end it',
-          }))}
-        />
         <button className={`picker-btn ${noKey ? 'attention' : ''}`} onClick={onKeys}>
           <span className="picker-l">SSH key</span>
           <span className="picker-v">{!keys ? 'Checking' : noKey ? 'Add one' : keys.length === 1 ? keyLabel(keys[0]) : `${keys.length} keys`}</span>
@@ -205,8 +195,8 @@ export function OrderView({
               <dd>{money(minCharge)}</dd>
               <dt>An hour</dt>
               <dd>{money(price)}</dd>
-              <dt>{releaseAfter ? `Until auto-end (${releaseAfter / 60} h)` : 'A working day (8 hours)'}</dt>
-              <dd>{money((price * (releaseAfter || 480)) / 60)}</dd>
+              <dt>A working day (8 hours)</dt>
+              <dd>{money(price * 8)}</dd>
               <dt className="spare">A full day</dt>
               <dd className="spare">{money(price * 24)}</dd>
               <dt>Your balance covers</dt>

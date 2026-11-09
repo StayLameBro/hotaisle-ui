@@ -185,7 +185,7 @@ function Console({
   const list = vms.data ?? [];
 
   // ---------------------------------------------------------------- the order, kept while you look at keys or settings
-  const [order, setOrderState] = useState<Order>(() => ({ count: prefs.gpus, image: prefs.image, customURL: prefs.customURL, releaseAfter: prefs.releaseAfter }));
+  const [order, setOrderState] = useState<Order>(() => ({ count: prefs.gpus, image: prefs.image, customURL: prefs.customURL }));
   const setOrder = useCallback((o: Partial<Order>) => setOrderState((s) => ({ ...s, ...o })), []);
   // an earlier run, opened from the history to look back at it
   const [run, setRun] = useState<Ended>();
@@ -286,8 +286,8 @@ function Console({
     const guess = placeNew(machinesRef.current, vm.gpus?.[0]?.count ?? 1);
     if (guess !== NEW) guessHost.current[vm.name] = guess;
     void api
-      .record({ team: h, name: vm.name, launched: true, image: meta.image, price_cents: meta.price, gpus: `${vm.gpus?.[0]?.count ?? 1}× ${vm.gpus?.[0]?.model ?? 'MI300X'}`, metal: !!vm.metal, ...(meta.releaseAfter ? { release_in_minutes: meta.releaseAfter } : {}) })
-      .then(() => records.refresh(), () => toast("Couldn't save this machine's launch time, so its timer and cost won't show.", 'err'));
+      .record({ team: h, name: vm.name, launched: true, image: meta.image, price_cents: meta.price, gpus: `${vm.gpus?.[0]?.count ?? 1}× ${vm.gpus?.[0]?.model ?? 'MI300X'}`, metal: !!vm.metal })
+      .then(() => records.refresh(), () => toast("Couldn't save this machine's launch time, so its running time and cost won't show.", 'err'));
     go('none', () => {
       vms.setData((l) => [...(l ?? []).filter((x) => x.name !== vm.name), vm]);
       setLaunchedNow(vm.name);
@@ -314,11 +314,6 @@ function Console({
       setReceipts((rs) => rs.filter((x) => x.name !== name));
       if (focus === name) setFocus(undefined);
     });
-  const onRecord = async (name: string, patch: { release_in_minutes: number }) => {
-    await api.record({ team: h, name, ...patch });
-    await records.refresh();
-  };
-
   const b = balance.data;
   const runout = b?.estimated_runout_time ? new Date(b.estimated_runout_time).getTime() - Date.now() : undefined;
   const gpusAtWork = list.reduce((n, v) => n + (v.gpus?.[0]?.count ?? 0), 0);
@@ -482,7 +477,6 @@ function Console({
                       setFocus(e.name);
                       onEnded(e);
                     }}
-                    onRecord={(p) => onRecord(vm.name, p)}
                   />
                 ),
               });

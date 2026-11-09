@@ -40,7 +40,6 @@ The Worker needs one secret, `SESSION_SECRET`, and uses one Durable Object class
 - Sign in with an emailed link or an API key. Passkeys once Hot Aisle's API supports them.
 - Virtual machines with 1, 2 or 4 MI300X, or a whole 8-GPU server as bare metal, with live availability and prices.
 - Image choice: standard, Hot Aisle's vLLM template, or your own cloud-init URL.
-- Auto-end after 1, 2, 4 or 8 hours, run by the Worker, with every browser closed.
 - Machine cards with boot progress, the SSH command (Copy, Open in Terminal), and running time and cost.
 - Receipts when a machine ends, and a history of past runs that you can open and launch again.
 - SSH keys: paste a public key, or remove one.
@@ -58,7 +57,7 @@ The Worker needs one secret, `SESSION_SECRET`, and uses one Durable Object class
 ```
 browser ── /auth, /api, /records ──▶ Worker ──▶ admin.hotaisle.app/api
    │                                   │
-   └── everything else: static files   └── Account Durable Object (one per account): records, history, auto-end alarms
+   └── everything else: static files   └── Account Durable Object (one per account): launch records and history
 ```
 
 - **Sign-in.** An API key is checked against `GET /user/` and used as `Authorization: Token <key>`. Email sign-in uses
@@ -68,9 +67,14 @@ browser ── /auth, /api, /records ──▶ Worker ──▶ admin.hotaisle.a
   the length of a request and never reaches the page.
 - **API calls.** The Hot Aisle API doesn't answer browsers directly, so the page calls `/api/*` and the Worker forwards
   it with the session's token.
-- **Records.** Launch times, auto-end timers and history live in a Durable Object per account, named by a hash of the
-  account's email. Each auto-end timer is a Durable Object alarm. To end a machine on time it keeps the latest token,
-  encrypted at rest, only while a timer is pending.
+- **Records.** Launch times and history live in a Durable Object per account, named by a hash of the account's
+  email. No logins are stored on the server.
+- **Staying signed in.** Email sessions last 20 minutes. With under a minute left, Hot Aisle answers any API call with
+  a new key, and the Worker switches the session to it, so you stay signed in while the app is open. The old key keeps
+  working until it expires, so requests already in flight finish.
+- **No auto-end.** Hot Aisle's API can't schedule a shutdown, and a timer kept by the app could miss one and leave a
+  machine billing, so the app doesn't offer one. Machines run until you end them; each card shows its running time
+  and cost.
 - **Guard.** `/auth`, `/api` and `/records` require `X-Requested-With: hotaisle-ui` and refuse cross-origin requests;
   with the `SameSite=Strict` cookie, other sites can't make these calls. Pages are served with a strict Content
   Security Policy.
@@ -103,7 +107,7 @@ cd web && npm run watch   # rebuild the app on save while wrangler dev runs
 - `worker/src/index.ts`: routes, the guard, sign-in and the API proxy. `session.ts`: the encrypted cookie.
   `account.ts`: the per-account Durable Object. `hotaisle.ts`: calls the Worker makes to Hot Aisle, including the
   email sign-in adapter.
-- `shared/records.ts`: machine records, history and auto-end, used by the Worker and by sample data.
+- `shared/records.ts`: machine records and history, used by the Worker and by sample data.
 - `web/`: the React + TypeScript app, built with Vite. `web/src/demo/` is the sample-data API.
 - `web/src/iso/`: the drawing. `hall.ts` builds the racks and GPU trays, `chip.ts` the MI300X close-up, `fanGL.ts`
   the WebGL fans; `Stage.tsx` animates them.

@@ -3,7 +3,7 @@ import { api, APIError, type Ended, type MachineRecord, type Team, type VM, type
 import { duration, gb, hoursOr, money, sshCommand, sshURL } from './format';
 import { Lcd } from './Lcd';
 import { vtName } from './motion';
-import { IMAGES, RELEASE_CHOICES } from './prefs';
+import { IMAGES } from './prefs';
 import { sound } from './sound';
 import type { StageMode } from './Stage';
 import { CopyButton, HoldButton, useToast } from './ui';
@@ -96,14 +96,13 @@ type TripProps = {
   onFocus: () => void;
   onChanged: () => void;
   onEnded: (e: Ended) => void;
-  onRecord: (p: { release_in_minutes: number }) => Promise<void>;
 };
 
 export function Trip(props: TripProps) {
-  const { team, vm, state, record, price, minimumMin, host: server, expanded, morph, onFocus, onChanged, onEnded, onRecord } = props;
+  const { team, vm, state, record, price, minimumMin, host: server, expanded, morph, onFocus, onChanged, onEnded } = props;
   const toast = useToast();
   const [ending, setEnding] = useState(false);
-  const [panel, setPanel] = useState<null | 'end' | 'rebuild' | 'timer'>(null);
+  const [panel, setPanel] = useState<null | 'end' | 'rebuild'>(null);
   const [menu, setMenu] = useState(false);
   const [force, setForce] = useState(false);
   const [busy, setBusy] = useState('');
@@ -196,15 +195,6 @@ export function Trip(props: TripProps) {
     }
   };
 
-  const setTimer = async (min: number) => {
-    try {
-      await onRecord({ release_in_minutes: min });
-      setPanel(null);
-    } catch (e) {
-      toast(`Couldn't set auto-end. ${(e as Error).message}`, 'err');
-    }
-  };
-
   const copy = async (text: string, what: string) => {
     setMenu(false);
     try {
@@ -268,18 +258,7 @@ export function Trip(props: TripProps) {
             <Chips n={g?.count ?? 1} mode={mode} />
             {busy && busy !== 'End' ? `${busy}…` : head}
           </h3>
-          {record?.last_error ? (
-            <p>{record.last_error}</p>
-          ) : ready ? (
-            <p className="sub-act">
-              <span>{record?.release_at ? `Ends on its own at ${at(record.release_at)}.` : sub}</span>
-              <button className="btn-text" onClick={() => setPanel('timer')}>
-                {record?.release_at ? 'Change' : 'Set auto-end'}
-              </button>
-            </p>
-          ) : (
-            <p>{sub}</p>
-          )}
+          <p>{sub}</p>
         </div>
         <div className="card-what">
           <b>{gpus}</b>
@@ -322,7 +301,7 @@ export function Trip(props: TripProps) {
       </div>
 
       <div className="run">
-        <Timeline start={launched} end={record?.release_at ? Date.parse(record.release_at) : undefined} now={now} endLabel={record?.release_at ? `Ends ${at(record.release_at)}` : 'No auto-end'} />
+        <Timeline start={launched} now={now} endLabel="Until you end it" />
         <Facts
           rows={[
             ['Server', server ? (vm.metal ? `${server}, the whole server` : server) : 'Being assigned'],
@@ -380,9 +359,6 @@ export function Trip(props: TripProps) {
           </button>
           {menu && (
             <div className="menu" role="menu">
-              <button role="menuitem" onClick={() => { setMenu(false); setPanel('timer'); }}>
-                {record?.release_at ? 'Change auto-end' : 'Set auto-end'}
-              </button>
               {ssh && (
                 <button role="menuitem" onClick={() => void copy(`Host ${vm.name}\n  HostName ${host}\n  Port ${ssh.port}\n  User hotaisle\n`, 'the SSH config entry')}>
                   Copy SSH config entry
@@ -419,27 +395,14 @@ export function Trip(props: TripProps) {
       </div>
 
       {panel && (
-        <div className="sheet" key={panel} role="dialog" aria-label={panel === 'end' ? 'End this machine' : panel === 'timer' ? 'Auto-end' : 'Rebuild'}>
-          {panel === 'timer' && (
-            <>
-              <p className="sheet-t">End {vm.name} automatically</p>
-              <div className="choice" role="radiogroup" aria-label="End after">
-                {RELEASE_CHOICES.map((c) => (
-                  <button key={c.min} role="radio" aria-checked={false} onClick={() => { sound.tick(); void setTimer(c.min); }}>
-                    {c.min ? `In ${c.label}` : 'Never'}
-                  </button>
-                ))}
-              </div>
-              <p className="muted small">Counted from now. Its disk is wiped when it ends. This app needs to be running.</p>
-            </>
-          )}
+        <div className="sheet" key={panel} role="dialog" aria-label={panel === 'end' ? 'End this machine' : 'Rebuild'}>
           {panel === 'end' && (
             <>
               <p className="sheet-t">End {vm.name}?</p>
               <p className="muted small">
                 {force || underMin
-                  ? `Its disk is wiped. ${vm.metal ? 'A server is' : 'Machines are'} billed for at least ${hoursOr(minimumMin)}, so ending now costs ${minCost ? `${minCost} in total` : `the full ${hoursOr(minimumMin)}`}.`
-                  : 'Billing stops and its disk is wiped.'}
+                  ? `This deletes the ${vm.metal ? 'server' : 'machine'} and everything on its ${vm.metal ? 'disks' : 'disk'}. ${vm.metal ? 'A server is' : 'Machines are'} billed for at least ${hoursOr(minimumMin)}, so ending now costs ${minCost ? `${minCost} in total` : `the full ${hoursOr(minimumMin)}`}.`
+                  : `This deletes the ${vm.metal ? 'server' : 'machine'} and everything on its ${vm.metal ? 'disks' : 'disk'}, and billing stops.`}
               </p>
               <HoldButton tone="danger" label={force ? 'Hold to end anyway' : 'Hold to end'} busyLabel="Ending" busy={busy === 'End'} onConfirm={() => end(force || underMin)} />
             </>
@@ -519,7 +482,7 @@ export function ReceiptCard({ r, onDone }: { r: Ended; onDone?: () => void }) {
   );
 }
 
-/** A run from start to finish: when it began, how far along it is, and when it ends (auto-end) or ended. */
+/** A run from start to finish: when it began, and how long it has run, or when it ended. */
 function Timeline({ start, end, now, endLabel }: { start?: number; end?: number; now: number; endLabel: string }) {
   if (!start) return null;
   const f = end && end > start ? Math.min(1, Math.max(0, (now - start) / (end - start))) : 1;
@@ -561,7 +524,7 @@ export function runFacts(r: Ended): [string, string][] {
     ...(r.cents != null && r.price_cents ? ([['Billed', `${duration((r.cents / r.price_cents) * 3600_000)}${r.minimum_applied ? ', the minimum' : ''}`]] as [string, string][]) : []),
     ...(r.cents != null ? ([['Per GPU', money(r.cents / (Number(r.gpus.split('×')[0]) || 1))]] as [string, string][]) : []),
     ['Machine', machineLine(r.cpu_cores, r.ram_capacity, r.disk_capacity)],
-    ['Ended', r.ended_by === 'auto-end' ? `On its own, by auto-end, ${day(r.ended_at)}` : `By you, ${day(r.ended_at)}`],
+    ['Ended', day(r.ended_at)],
     ...(r.note ? ([['Note', r.note]] as [string, string][]) : []),
   ];
 }

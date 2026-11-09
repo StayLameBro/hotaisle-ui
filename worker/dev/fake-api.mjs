@@ -12,7 +12,8 @@ export function fakeHotAisle({ onEmail } = {}) {
   const calls = [];
   const logins = new Map(); // ticket -> { email, opened, token }
   const tokens = new Map(Object.entries(KEYS));
-  const sessions = new Map(); // session token -> email
+  const sessions = new Map(); // session token -> { email, expires }
+  const LIFETIME = 20 * 60_000; // Hot Aisle's email sessions last 20 minutes
   const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } });
 
   async function fetch(input, init) {
@@ -25,6 +26,11 @@ export function fakeHotAisle({ onEmail } = {}) {
 
     // test controls
     if (path === '/__calls') return json(calls);
+    if (path === '/__expire') {
+      // bring a person's sessions near their end, as if 19 minutes had passed
+      for (const x of sessions.values()) if (x.email === url.searchParams.get('email')) x.expires = Date.now() + Number(url.searchParams.get('in') ?? 30) * 1000;
+      return json({ ok: true });
+    }
     if (path === '/__open') {
       const l = [...logins.values()].find((x) => x.email === url.searchParams.get('email'));
       if (!l) return json({ error: 'no login for that email' }, 404);
@@ -51,14 +57,31 @@ export function fakeHotAisle({ onEmail } = {}) {
       const { claim_ticket } = await req.json();
       const l = logins.get(claim_ticket);
       if (!l || !l.opened) return json({ message: 'not approved, expired, or already used' }, 401);
-      sessions.set(l.token, l.email);
+      const expires = Date.now() + LIFETIME;
+      sessions.set(l.token, { email: l.email, expires });
       logins.delete(claim_ticket);
-      return new Response(null, { status: 204, headers: { 'X-New-Session-Key': l.token, 'X-Session-Key-Expires': new Date(Date.now() + 7 * 86400_000).toUTCString() } });
+      return new Response(null, { status: 204, headers: { 'X-New-Session-Key': l.token, 'X-Session-Key-Expires': new Date(expires).toUTCString() } });
     }
 
-    // an API key only as a key, a session only as a session
-    const who = session ? sessions.get(session) : tokens.get(key);
+    // an API key only as a key, a session only as a session; an expired session is refused
+    const live = session ? sessions.get(session) : undefined;
+    if (live && live.expires <= Date.now()) return json({ message: 'Session expired' }, 401);
+    const who = session ? live?.email : tokens.get(key);
     if (!who) return json({ message: 'Invalid token' }, 401);
+    // with under a minute left, any call answers with a new key; the old one keeps working until it expires
+    const renew = live && live.expires - Date.now() < 60_000 ? (() => {
+      const token = 'sess-' + crypto.randomUUID();
+      const expires = Date.now() + LIFETIME;
+      sessions.set(token, { email: who, expires });
+      return { 'X-New-Session-Key': token, 'X-Session-Key-Expires': new Date(expires).toUTCString() };
+    })() : undefined;
+    const r = await answer(req, path, who);
+    if (renew) for (const [k, v] of Object.entries(renew)) r.headers.set(k, v);
+    return r;
+  }
+
+  async function answer(req, path, who) {
+    const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } });
     if (path === '/user/') return json({ user: { email: who, name: who.split('@')[0] }, teams: [{ handle: 'lab', name: 'Lab', roles: ['owner'], effective_roles: ['owner'] }] });
     if (req.method === 'DELETE') return new Response(null, { status: 204 });
     if (path.endsWith('/whoami/')) return json({ who, path });

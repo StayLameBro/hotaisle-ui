@@ -3,7 +3,7 @@
 //   /auth/*     sign in (an API key, or an emailed link), see who is signed in, sign out
 //   /api/*      the Hot Aisle API, forwarded with the session's token (the API doesn't answer browsers directly,
 //               and the token never reaches the page)
-//   /records/*  this account's machine records, history and auto-end timers (a Durable Object per account)
+//   /records/*  this account's machine records and history (a Durable Object per account)
 //   anything else: the app
 //
 // Every /auth, /api and /records call must carry `X-Requested-With: hotaisle-ui` and, when the browser sends an
@@ -62,7 +62,7 @@ export default {
     const session = await readSession(req, env.SESSION_SECRET);
     if (area === 'auth') return auth(req, env, url, session);
     if (!session?.token || !session.account) return fail(401, 'not signed in');
-    if (area === 'api') return proxy(req, env, url, credentialOf(session));
+    if (area === 'api') return proxy(req, env, url, session);
     return records(req, env, url, session);
   },
 } satisfies ExportedHandler<Env>;
@@ -120,10 +120,10 @@ async function auth(req: Request, env: Env, url: URL, session: Session | undefin
       const who = await whoIs(env, cred);
       if (!who.ok) return fail(who.status, who.message);
       const account = await accountId(who.who.user?.email || p.email);
-      // the cookie lasts as long as Hot Aisle's session, and at most 30 days
+      // the cookie lasts as long as Hot Aisle's session (it's renewed as the app is used), and at most 30 days
       const days = c.expires ? Math.max(1 / 1440, (c.expires - Date.now()) / 86400_000) : 30;
       return json({ done: true, ...JSON.parse(who.body) }, 200, {
-        'Set-Cookie': await sessionCookie(env.SESSION_SECRET, { token: c.token, kind: 'email', account }, Math.min(days, 30)),
+        'Set-Cookie': await sessionCookie(env.SESSION_SECRET, { token: c.token, kind: 'email', account, tokenExp: c.expires }, Math.min(days, 30)),
       });
     }
 
@@ -137,7 +137,8 @@ async function auth(req: Request, env: Env, url: URL, session: Session | undefin
 
 const FORWARD_HEADERS = ['Content-Type', 'Accept'];
 
-async function proxy(req: Request, env: Env, url: URL, cred: Credential): Promise<Response> {
+async function proxy(req: Request, env: Env, url: URL, session: Session): Promise<Response> {
+  const cred = credentialOf(session);
   const path = url.pathname.slice('/api'.length) + url.search;
   const headers = new Headers();
   for (const h of FORWARD_HEADERS) {
@@ -158,6 +159,16 @@ async function proxy(req: Request, env: Env, url: URL, cred: Credential): Promis
     return fail(502, 'Could not reach the Hot Aisle API: ' + (e as Error).message);
   }
   const out = new Response(r.body, { status: r.status, headers: { 'Content-Type': r.headers.get('Content-Type') ?? 'application/json', 'Cache-Control': 'no-store' } });
+  // Renewal: when an email session has under a minute left, Hot Aisle answers any call with a new key and its
+  // expiry. The old key keeps working until its own expiry, so requests already in flight finish; the session
+  // switches to the new key only if it lasts at least as long as the one it has (expiries come in whole seconds),
+  // so a slow, older answer can't undo it.
+  const fresh = r.headers.get('X-New-Session-Key');
+  const until = Date.parse(r.headers.get('X-Session-Key-Expires') ?? '');
+  if (cred.kind === 'email' && fresh && Number.isFinite(until) && until >= (session.tokenExp ?? 0) && fresh !== session.token) {
+    const days = Math.min(30, Math.max(1 / 1440, (until - Date.now()) / 86400_000));
+    out.headers.set('Set-Cookie', await sessionCookie(env.SESSION_SECRET, { token: fresh, kind: 'email', account: session.account, tokenExp: until }, days));
+  }
   return withHeaders(out);
 }
 
@@ -167,8 +178,7 @@ async function records(req: Request, env: Env, url: URL, session: Session): Prom
   const stub = env.ACCOUNTS.get(env.ACCOUNTS.idFromName(session.account!));
   const inner = new Request('https://account' + url.pathname.slice('/records'.length) + url.search, {
     method: req.method,
-    // the credential, so a pending auto-end timer can still end its machine later
-    headers: { 'Content-Type': 'application/json', 'X-Hotaisle-Credential': JSON.stringify(credentialOf(session)) },
+    headers: { 'Content-Type': 'application/json' },
     body: req.method === 'GET' ? undefined : await req.text(),
   });
   const r = await stub.fetch(inner);

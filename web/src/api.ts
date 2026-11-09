@@ -67,15 +67,13 @@ export type Status = {
   demo: boolean;
 };
 
-/** What this app remembers about a machine (the API doesn't keep launch time or timers). */
+/** What this app remembers about a machine (the API doesn't keep its launch time, image or price). */
 export type MachineRecord = {
   team: string;
   name: string;
   launched_at?: string;
   image?: string;
   price_cents?: number;
-  release_at?: string;
-  last_error?: string;
 };
 
 /** A machine that has ended, as this app saw it. Kept with the account (or in the tab, for sample data). */
@@ -97,7 +95,7 @@ export type Ended = {
   cpu_cores?: number;
   ram_capacity?: number;
   disk_capacity?: number;
-  ended_by?: 'you' | 'auto-end';
+  ended_by?: 'you';
 };
 
 export class APIError extends Error {
@@ -206,7 +204,7 @@ export const api = {
   emailWait: () => call<{ done: boolean; user?: User; teams?: Team[] }>('POST', '/auth/email/wait'),
   signOut: () => call<{ ok: boolean }>('POST', '/auth/signout'),
   records: (team: string) => call<MachineRecord[]>('GET', `/records/machines?team=${encodeURIComponent(team)}`),
-  record: (body: { team: string; name: string; launched?: boolean; image?: string; price_cents?: number; release_in_minutes?: number; gpus?: string; metal?: boolean }) =>
+  record: (body: { team: string; name: string; launched?: boolean; image?: string; price_cents?: number; gpus?: string; metal?: boolean }) =>
     call<MachineRecord>('POST', '/records/machines', body),
   prune: (team: string, names: string[]) => call<void>('POST', '/records/machines/prune', { team, names }),
   history: (team: string) => call<Ended[]>('GET', `/records/history?team=${encodeURIComponent(team)}`),
