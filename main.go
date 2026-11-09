@@ -61,7 +61,8 @@ func main() {
 		static = os.DirFS(*staticDir)
 	}
 	statePath := filepath.Join(filepath.Dir(cfg.Path), "ui-state.json")
-	srv, err := server.New(server.Options{APIBase: *apiBase, Config: cfg, Static: static, StartDemo: *demo, Version: version, StatePath: statePath})
+	secretPath := filepath.Join(filepath.Dir(cfg.Path), "ui-session")
+	srv, err := server.New(server.Options{APIBase: *apiBase, Config: cfg, Static: static, StartDemo: *demo, Version: version, StatePath: statePath, SecretPath: secretPath})
 	if err != nil {
 		fatal(err)
 	}

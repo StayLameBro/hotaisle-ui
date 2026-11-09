@@ -85,6 +85,9 @@ type Options struct {
 	StartDemo bool
 	Version   string
 	StatePath string // where launch times and release timers are kept ("" = memory only)
+	// SecretPath keeps the local session secret (mode 0600), so an open tab keeps working after a
+	// restart. "" makes a new secret every run.
+	SecretPath string
 
 	// Hosted serves many people from one server; see hosted.go.
 	Hosted   bool
@@ -112,8 +115,8 @@ func New(opt Options) (*Server, error) {
 	if err != nil || base.Scheme == "" || base.Host == "" {
 		return nil, fmt.Errorf("invalid API base %q", opt.APIBase)
 	}
-	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {
+	secret, err := loadSecret(opt.SecretPath)
+	if err != nil {
 		return nil, err
 	}
 	real, err := state.Open(opt.StatePath)
@@ -121,7 +124,7 @@ func New(opt Options) (*Server, error) {
 		return nil, fmt.Errorf("reading %s: %w", opt.StatePath, err)
 	}
 	sample, _ := state.Open("")
-	s := &Server{opt: opt, secret: hex.EncodeToString(b), demo: demo.New(),
+	s := &Server{opt: opt, secret: secret, demo: demo.New(),
 		client: &http.Client{Timeout: 30 * time.Second}, real: real, sample: sample}
 	if opt.Hosted {
 		s.hosted = newHosted(opt)
@@ -155,6 +158,31 @@ func New(opt Options) (*Server, error) {
 		},
 	}
 	return s, nil
+}
+
+// loadSecret returns the local session secret kept at path, making and saving one (mode 0600) the first
+// time. With no path, or a file that can't be used, it is a fresh secret for this run only.
+func loadSecret(path string) (string, error) {
+	if path != "" {
+		if b, err := os.ReadFile(path); err == nil {
+			if v := strings.TrimSpace(string(b)); len(v) == 48 {
+				if _, err := hex.DecodeString(v); err == nil {
+					return v, nil
+				}
+			}
+		}
+	}
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	v := hex.EncodeToString(b)
+	if path != "" {
+		if os.MkdirAll(filepath.Dir(path), 0o700) == nil {
+			_ = os.WriteFile(path, []byte(v+"\n"), 0o600)
+		}
+	}
+	return v, nil
 }
 
 // ListenHosted binds addr (":8080", "0.0.0.0:8080") for a hosted server and returns the address.

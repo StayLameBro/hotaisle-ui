@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, type Ended, type LocalStatus, type MachineRecord, type Team, type User, type VM, type VMState } from './api';
+import { api, APIError, type Ended, type LocalStatus, type MachineRecord, type Team, type User, type VM, type VMState } from './api';
 import { Connect } from './Connect';
 import { duration, money, specRows } from './format';
 import { ImageView, KeysView, OrderView, sizesOf, type LaunchMeta, type Order } from './Launch';
@@ -19,13 +19,19 @@ export function App() {
   const [me, setMe] = useState<{ user: User; teams: Team[] }>();
   const [teamHandle, setTeamHandle] = useState<string>();
   const [loadErr, setLoadErr] = useState('');
+  // this page's session belongs to an earlier run of hotaisle-ui (or none): only the printed link fixes that
+  const [stale, setStale] = useState(false);
 
   useEffect(() => applyTheme(prefs.theme), [prefs.theme]);
 
   const boot = useCallback(async () => {
     setLoadErr('');
+    setStale(false);
     try {
-      const st = await api.status();
+      const st = await api.status().catch((e) => {
+        if (e instanceof APIError && e.status === 401) setStale(true);
+        throw e;
+      });
       setStatus(st);
       if (!st.connected && !st.demo) {
         setMe(undefined);
@@ -52,6 +58,20 @@ export function App() {
     if (!status?.demo) await api.saveTeam(h).catch(() => undefined);
   };
 
+  if (stale)
+    return (
+      <main className="center">
+        <div className="lone">
+          <h1>Open the link from your terminal</h1>
+          <p className="lede">This page is from an earlier run of hotaisle-ui. Open the link it printed when it started, or run it again.</p>
+          <div className="row">
+            <button className="btn primary" onClick={() => void boot()}>
+              Try again
+            </button>
+          </div>
+        </div>
+      </main>
+    );
   if (loadErr)
     return (
       <main className="center">

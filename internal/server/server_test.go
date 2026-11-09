@@ -263,3 +263,25 @@ func TestReleaseTimerBareMetal(t *testing.T) {
 		t.Fatalf("history after auto-end: %+v", h)
 	}
 }
+
+func TestSecretSurvivesARestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ui-session")
+	a, err := loadSecret(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := loadSecret(path)
+	if a != b || len(a) != 48 {
+		t.Fatalf("a restart made a new secret: %q then %q", a, b)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("secret file must be 0600: %v %v", fi.Mode(), err)
+	}
+	if c, _ := loadSecret(""); c == a || len(c) != 48 {
+		t.Fatalf("no path must mean a fresh secret")
+	}
+	os.WriteFile(path, []byte("not-hex\n"), 0o600)
+	if d, _ := loadSecret(path); d == a || len(d) != 48 {
+		t.Fatalf("a damaged file must be replaced: %q", d)
+	}
+}
