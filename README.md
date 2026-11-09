@@ -19,6 +19,9 @@ chmod +x hotaisle-ui
 ./hotaisle-ui            # your Hot Aisle account
 ```
 
+Each release has a `SHA256SUMS` file, and build provenance showing it was built by this repository's release workflow
+from its source: `gh attestation verify hotaisle-ui -R StayLameBro/hotaisle-ui`.
+
 It starts a server on `127.0.0.1` and opens your browser. To build from source (Go 1.24+, Node 20+):
 
 ```sh
