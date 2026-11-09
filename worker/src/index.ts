@@ -9,7 +9,7 @@
 // Every /auth, /api and /records call must carry `X-Requested-With: hotaisle-ui` and, when the browser sends an
 // Origin, come from this site. Together with the SameSite=Strict cookie, other sites can't make these calls.
 
-import { apiBase, claimEmailLogin, emailLoginEnabled, send, startEmailLogin, whoIs, type Env } from './hotaisle';
+import { apiBase, authHeaders, completeEmailLogin, send, startEmailLogin, waitEmailLogin, whoIs, type Credential, type Env } from './hotaisle';
 import { accountId, readSession, sessionCookie, type Session } from './session';
 
 export { Account } from './account';
@@ -62,10 +62,13 @@ export default {
     const session = await readSession(req, env.SESSION_SECRET);
     if (area === 'auth') return auth(req, env, url, session);
     if (!session?.token || !session.account) return fail(401, 'not signed in');
-    if (area === 'api') return proxy(req, env, url, session.token);
+    if (area === 'api') return proxy(req, env, url, credentialOf(session));
     return records(req, env, url, session);
   },
 } satisfies ExportedHandler<Env>;
+
+/** What this session's calls go out with: an API key, or a session from email sign-in (each has its own header). */
+const credentialOf = (s: Session): Credential => ({ token: s.token!, kind: s.kind === 'email' ? 'email' : 'key' });
 
 // ---------------------------------------------------------------- sign-in
 
@@ -77,7 +80,7 @@ async function auth(req: Request, env: Env, url: URL, session: Session | undefin
         signed_in: !!session?.token,
         kind: session?.token ? session.kind : undefined,
         waiting_for_email: session?.pending && !session.token ? { email: session.pending.email, expires_at: session.pending.expires_at } : undefined,
-        email_login: emailLoginEnabled(env),
+        email_login: true,
         passkeys: false,
         version: env.VERSION ?? 'dev',
       });
@@ -86,14 +89,13 @@ async function auth(req: Request, env: Env, url: URL, session: Session | undefin
       const b = await readJSON<{ key?: string }>(req, 4096);
       const key = (b?.key ?? '').trim().replace(/^Token\s+/i, '');
       if (!key || /\s/.test(key)) return fail(400, "That doesn't look like an API key. It is one line, with no spaces.");
-      const who = await whoIs(env, key);
+      const who = await whoIs(env, { token: key, kind: 'key' });
       if (!who.ok) return fail(who.status, who.message);
       const account = await accountId(who.who.user?.email || 'key:' + key);
       return json(JSON.parse(who.body), 200, { 'Set-Cookie': await sessionCookie(env.SESSION_SECRET, { token: key, kind: 'key', account }) });
     }
 
     case 'POST /auth/email/start': {
-      if (!emailLoginEnabled(env)) return fail(404, 'Email sign-in is not available yet. Use an API key.');
       const b = await readJSON<{ email?: string }>(req, 1024);
       const email = (b?.email ?? '').trim();
       if (!EMAIL.test(email) || email.length > 254) return fail(400, "That doesn't look like an email address.");
@@ -108,15 +110,20 @@ async function auth(req: Request, env: Env, url: URL, session: Session | undefin
       const p = session?.pending;
       if (!p) return fail(400, 'No email sign-in in progress.');
       if (Date.parse(p.expires_at) <= Date.now()) return fail(410, 'That link has expired. Send a new one.');
-      const r = await claimEmailLogin(env, p.ticket);
-      if (r.state === 'waiting') return json({ done: false });
-      if (r.state === 'failed') return fail(400, r.message);
-      const who = await whoIs(env, r.token);
+      // Hot Aisle holds this request for up to 20 seconds while the link isn't approved yet
+      const w = await waitEmailLogin(env, p.ticket);
+      if (w === 'waiting') return json({ done: false });
+      if (typeof w === 'object') return fail(410, w.failed);
+      const c = await completeEmailLogin(env, p.ticket);
+      if ('failed' in c) return fail(410, c.failed);
+      const cred: Credential = { token: c.token, kind: 'email' };
+      const who = await whoIs(env, cred);
       if (!who.ok) return fail(who.status, who.message);
       const account = await accountId(who.who.user?.email || p.email);
-      const days = r.expires_at ? Math.max(1 / 1440, (Date.parse(r.expires_at) - Date.now()) / 86400_000) : 30;
+      // the cookie lasts as long as Hot Aisle's session, and at most 30 days
+      const days = c.expires ? Math.max(1 / 1440, (c.expires - Date.now()) / 86400_000) : 30;
       return json({ done: true, ...JSON.parse(who.body) }, 200, {
-        'Set-Cookie': await sessionCookie(env.SESSION_SECRET, { token: r.token, kind: 'email', account }, Math.min(days, 30)),
+        'Set-Cookie': await sessionCookie(env.SESSION_SECRET, { token: c.token, kind: 'email', account }, Math.min(days, 30)),
       });
     }
 
@@ -130,14 +137,14 @@ async function auth(req: Request, env: Env, url: URL, session: Session | undefin
 
 const FORWARD_HEADERS = ['Content-Type', 'Accept'];
 
-async function proxy(req: Request, env: Env, url: URL, token: string): Promise<Response> {
+async function proxy(req: Request, env: Env, url: URL, cred: Credential): Promise<Response> {
   const path = url.pathname.slice('/api'.length) + url.search;
   const headers = new Headers();
   for (const h of FORWARD_HEADERS) {
     const v = req.headers.get(h);
     if (v) headers.set(h, v);
   }
-  headers.set('Authorization', `Token ${token}`);
+  for (const [k, v] of Object.entries(authHeaders(cred))) headers.set(k, v);
   headers.set('User-Agent', `hotaisle-ui/${env.VERSION ?? 'dev'}`);
   let r: Response;
   try {
@@ -160,7 +167,8 @@ async function records(req: Request, env: Env, url: URL, session: Session): Prom
   const stub = env.ACCOUNTS.get(env.ACCOUNTS.idFromName(session.account!));
   const inner = new Request('https://account' + url.pathname.slice('/records'.length) + url.search, {
     method: req.method,
-    headers: { 'Content-Type': 'application/json', 'X-Hotaisle-Token': session.token! },
+    // the credential, so a pending auto-end timer can still end its machine later
+    headers: { 'Content-Type': 'application/json', 'X-Hotaisle-Credential': JSON.stringify(credentialOf(session)) },
     body: req.method === 'GET' ? undefined : await req.text(),
   });
   const r = await stub.fetch(inner);

@@ -39,17 +39,16 @@ Node 20+. The Worker serves `web/dist` as static assets, so run `npm run build` 
 
 ## Connecting it to the real API
 
-The page calls `/api/*`, which the Worker forwards verbatim to `https://admin.hotaisle.app/api` with
-`Authorization: Token <session token>`. The API surface the app depends on is what `web/src/demo/api.ts` implements;
+The page calls `/api/*`, which the Worker forwards verbatim to `https://admin.hotaisle.app/api` with the session's
+credential: `Authorization: Token <key>` for an API key, `X-Session-Key: <token>` for an email sign-in
+(`authHeaders` in `worker/src/hotaisle.ts`). The API surface the app depends on is what `web/src/demo/api.ts` implements;
 compare its routes and JSON shapes with the live API to find mismatches, fix them in `web/src/api.ts`, and keep the
 sample data in step.
 
-**Email sign-in.** The schema defines `EmailLoginRequest {email}`, `EmailLoginResponse {claim_ticket, email,
-expires_at}` and `EmailLoginClaimRequest {claim_ticket}` but no paths yet. Set `EMAIL_LOGIN_START_PATH` and
-`EMAIL_LOGIN_CLAIM_PATH` in `wrangler.jsonc` when they're published. The shape of a finished claim isn't published
-either: `claimEmailLogin` in `worker/src/hotaisle.ts` is the one place that reads it (it accepts `token`,
-`session_token`, `api_key` or `session.token`, and treats 202/204/408/409/425/428 as still waiting). If session
-tokens use a different `Authorization` scheme than `Token`, change it in `upstream()` and `proxy()`.
+**Email sign-in.** `POST /user/email/login/ {email}` returns a private `claim_ticket` (kept in the encrypted session,
+never sent to the page); `POST /user/email/wait/ {claim_ticket}` holds up to 20 s and answers 202 (waiting) or 204
+(approved); `POST /user/email/complete/ {claim_ticket}` answers 204 with the session token in `X-New-Session-Key` and
+its expiry in `X-Session-Key-Expires`, or 401. All of it is in `worker/src/hotaisle.ts`.
 
 **Passkeys.** Not in the API yet. They would add `/auth/passkey/*` routes that relay the WebAuthn ceremony to Hot
 Aisle and store the resulting token in the session, the same way email sign-in does.
@@ -80,5 +79,5 @@ Layout and motion (checked by `npm run test:ui`):
 
 ## Not verified yet
 
-Everything has run against sample data and the stand-in API only: not a real account, not the real email sign-in
-endpoints, not bare metal for real, and not the deploy button.
+Everything has run against sample data and the stand-in API only (which follows Hot Aisle's documented email
+sign-in): not a real account, not the live email sign-in, not bare metal for real, and not the deploy button.

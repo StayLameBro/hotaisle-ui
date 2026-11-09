@@ -13,7 +13,7 @@ export function Connect({ status, onConnected, onDemo }: { status: Status; onCon
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  // waiting for the emailed link: ask every few seconds; the page signs in by itself once it's opened
+  // waiting for the emailed link: Hot Aisle holds each check for up to 20 seconds, so ask again straight away
   useEffect(() => {
     if (step !== 'waiting') return;
     let stop = false;
@@ -29,9 +29,9 @@ export function Connect({ status, onConnected, onDemo }: { status: Status; onCon
         setStep('email');
         return;
       }
-      timer = window.setTimeout(poll, 2500);
+      timer = window.setTimeout(poll, 300);
     };
-    timer = window.setTimeout(poll, 2500);
+    timer = window.setTimeout(poll, 300);
     return () => {
       stop = true;
       clearTimeout(timer);
@@ -80,7 +80,7 @@ export function Connect({ status, onConnected, onDemo }: { status: Status; onCon
         {step === 'email' && (
           <>
             <h1>Sign in</h1>
-            <p className="lede">We'll email you a link. Open it, and this page signs in by itself.</p>
+            <p className="lede">We'll email you a link. Open it and approve the sign-in, and this page signs in by itself.</p>
             <form onSubmit={sendLink} className="step-b">
               <label htmlFor="email">
                 <b>Email address</b>
@@ -105,7 +105,7 @@ export function Connect({ status, onConnected, onDemo }: { status: Status; onCon
           <>
             <h1>Check your email</h1>
             <p className="lede">
-              We sent a sign-in link to <b>{sentTo}</b>. Open it on any device; this page signs in as soon as you do.
+              We sent a sign-in link to <b>{sentTo}</b>. Open it on any device and approve the sign-in; this page signs in as soon as you do.
             </p>
             <p className="hint">Waiting for the link to be opened…</p>
             <p className="hint">

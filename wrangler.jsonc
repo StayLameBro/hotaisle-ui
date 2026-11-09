@@ -17,9 +17,6 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Account"] }],
   "vars": {
     "API_BASE": "https://admin.hotaisle.app/api"
-    // Email sign-in, once the API publishes its endpoints (paths relative to API_BASE):
-    // "EMAIL_LOGIN_START_PATH": "/…",
-    // "EMAIL_LOGIN_CLAIM_PATH": "/…"
   },
   // SESSION_SECRET is a secret, not a var: `npx wrangler secret put SESSION_SECRET` (32+ random characters).
   "observability": { "enabled": true }

@@ -1,28 +1,27 @@
 // A stand-in for the Hot Aisle API's sign-in parts, for tests and for trying the sign-in screens locally
-// without an account. It knows two API keys and does the email-link sign-in the API's schema describes:
-// start with an email, get a private claim ticket, wait until the emailed link is opened, then receive a token.
-//
-// Email sign-in paths here are made up (the real ones aren't published yet); the Worker reads them from
-// EMAIL_LOGIN_START_PATH and EMAIL_LOGIN_CLAIM_PATH.
+// without an account. It knows two API keys (sent as `Authorization: Token <key>`) and does Hot Aisle's email
+// sign-in: start with an email and get a private claim ticket; `wait` answers 202 until the emailed link is
+// approved, then 204; `complete` exchanges the ticket for a session, sent back in the X-New-Session-Key header and
+// used as `X-Session-Key: <token>`. Each call is logged with how it authenticated ("key:…" or "session:…").
 //
 //   node worker/dev/fake-api.mjs    runs it with `wrangler dev` pointed at it, and prints each "email" link
 
-export const FAKE_EMAIL_START = '/fake/email-login/';
-export const FAKE_EMAIL_CLAIM = '/fake/email-login/claim/';
 export const KEYS = { 'tok-alice': 'alice@example.com', 'tok-bob': 'bob@example.com' };
 
 export function fakeHotAisle({ onEmail } = {}) {
   const calls = [];
   const logins = new Map(); // ticket -> { email, opened, token }
   const tokens = new Map(Object.entries(KEYS));
+  const sessions = new Map(); // session token -> email
   const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } });
 
   async function fetch(input, init) {
     const req = typeof input === 'string' || input instanceof URL ? new Request(input, init) : input;
     const url = new URL(req.url);
     const path = url.pathname.replace(/^\/api/, '');
-    const token = (req.headers.get('Authorization') ?? '').replace(/^Token /, '');
-    calls.push(`${req.method} ${path}${url.search} ${token}`);
+    const key = (req.headers.get('Authorization') ?? '').replace(/^Token /, '');
+    const session = req.headers.get('X-Session-Key') ?? '';
+    calls.push(`${req.method} ${path}${url.search} ${session ? 'session:' + session : key ? 'key:' + key : '-'}`);
 
     // test controls
     if (path === '/__calls') return json(calls);
@@ -33,7 +32,7 @@ export function fakeHotAisle({ onEmail } = {}) {
       return json({ ok: true });
     }
 
-    if (req.method === 'POST' && path === FAKE_EMAIL_START) {
+    if (req.method === 'POST' && path === '/user/email/login/') {
       const { email } = await req.json();
       const ticket = 'ticket-' + crypto.randomUUID();
       const login = { email: String(email).toLowerCase(), opened: false, token: 'sess-' + crypto.randomUUID() };
@@ -41,17 +40,24 @@ export function fakeHotAisle({ onEmail } = {}) {
       onEmail?.(login.email, `/api/__open?email=${encodeURIComponent(login.email)}`);
       return json({ claim_ticket: ticket, email: login.email, expires_at: new Date(Date.now() + 15 * 60_000).toISOString() });
     }
-    if (req.method === 'POST' && path === FAKE_EMAIL_CLAIM) {
+    if (req.method === 'POST' && path === '/user/email/wait/') {
       const { claim_ticket } = await req.json();
       const l = logins.get(claim_ticket);
-      if (!l) return json({ message: 'unknown ticket' }, 400);
-      if (!l.opened) return new Response(null, { status: 202 });
-      tokens.set(l.token, l.email);
+      if (!l) return json({ message: 'unknown ticket' }, 401);
+      if (!l.opened) await new Promise((r) => setTimeout(r, 300)); // the real one holds the request up to 20 s
+      return new Response(null, { status: l.opened ? 204 : 202 });
+    }
+    if (req.method === 'POST' && path === '/user/email/complete/') {
+      const { claim_ticket } = await req.json();
+      const l = logins.get(claim_ticket);
+      if (!l || !l.opened) return json({ message: 'not approved, expired, or already used' }, 401);
+      sessions.set(l.token, l.email);
       logins.delete(claim_ticket);
-      return json({ token: l.token, expires_at: new Date(Date.now() + 7 * 86400_000).toISOString() });
+      return new Response(null, { status: 204, headers: { 'X-New-Session-Key': l.token, 'X-Session-Key-Expires': new Date(Date.now() + 7 * 86400_000).toUTCString() } });
     }
 
-    const who = tokens.get(token);
+    // an API key only as a key, a session only as a session
+    const who = session ? sessions.get(session) : tokens.get(key);
     if (!who) return json({ message: 'Invalid token' }, 401);
     if (path === '/user/') return json({ user: { email: who, name: who.split('@')[0] }, teams: [{ handle: 'lab', name: 'Lab', roles: ['owner'], effective_roles: ['owner'] }] });
     if (req.method === 'DELETE') return new Response(null, { status: 204 });
@@ -85,7 +91,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   server.listen(8788, '127.0.0.1', async () => {
     console.log('fake Hot Aisle API on http://127.0.0.1:8788/api  (API keys: tok-alice, tok-bob)');
     const secret = (await import('node:crypto')).randomBytes(32).toString('base64url');
-    const w = spawn('npx', ['wrangler', 'dev', '--port', '8787', '--var', `SESSION_SECRET:${secret}`, '--var', 'API_BASE:http://127.0.0.1:8788/api', '--var', `EMAIL_LOGIN_START_PATH:${FAKE_EMAIL_START}`, '--var', `EMAIL_LOGIN_CLAIM_PATH:${FAKE_EMAIL_CLAIM}`], { stdio: 'inherit' });
+    const w = spawn('npx', ['wrangler', 'dev', '--port', '8787', '--var', `SESSION_SECRET:${secret}`, '--var', 'API_BASE:http://127.0.0.1:8788/api'], { stdio: 'inherit' });
     w.on('exit', (c) => process.exit(c ?? 0));
   });
 }

@@ -21,7 +21,7 @@ import {
   type MachineUpdate,
   type RecordsState,
 } from '../../shared/records';
-import { upstream, type Env } from './hotaisle';
+import { upstream, type Credential, type Env } from './hotaisle';
 import { deriveKey, open, seal } from './session';
 
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } });
@@ -33,7 +33,7 @@ export class Account extends DurableObject<Env> {
   }
 
   /** Saves the records, keeps the alarm on the next timer, and keeps a token only while one is pending. */
-  private async save(s: RecordsState, token?: string) {
+  private async save(s: RecordsState, cred?: Credential) {
     await this.ctx.storage.put('records', s);
     const next = nextRelease(s);
     if (next == null) {
@@ -41,21 +41,26 @@ export class Account extends DurableObject<Env> {
       await this.ctx.storage.delete('token');
       return;
     }
-    if (token) await this.ctx.storage.put('token', await seal(await deriveKey(this.env.SESSION_SECRET, 'token at rest'), token));
+    if (cred) await this.ctx.storage.put('token', await seal(await deriveKey(this.env.SESSION_SECRET, 'token at rest'), cred));
     const at = await this.ctx.storage.getAlarm();
     if (at == null || at !== next) await this.ctx.storage.setAlarm(Math.max(next, Date.now()));
   }
 
-  private async token(): Promise<string | undefined> {
+  private async credential(): Promise<Credential | undefined> {
     const sealed = await this.ctx.storage.get<string>('token');
-    return sealed ? open<string>(await deriveKey(this.env.SESSION_SECRET, 'token at rest'), sealed) : undefined;
+    return sealed ? open<Credential>(await deriveKey(this.env.SESSION_SECRET, 'token at rest'), sealed) : undefined;
   }
 
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const team = url.searchParams.get('team') ?? '';
-    // the token of the request this came from, so a pending timer can still end its machine later
-    const token = req.headers.get('X-Hotaisle-Token') || undefined;
+    // the credential of the request this came from, so a pending timer can still end its machine later
+    let token: Credential | undefined;
+    try {
+      token = JSON.parse(req.headers.get('X-Hotaisle-Credential') ?? 'null') ?? undefined;
+    } catch {
+      token = undefined;
+    }
     const s = await this.load();
     const body = async <T>(limit: number): Promise<T | undefined> => {
       const text = await req.text();
@@ -100,10 +105,10 @@ export class Account extends DurableObject<Env> {
   /** Auto-end: ends every machine whose time has come, records it, and sets the alarm for the next one. */
   async alarm() {
     const s = await this.load();
-    const token = await this.token();
+    const cred = await this.credential();
     await fireTimers(s, async (path) => {
-      if (!token) return { status: 0, message: 'no token: sign in again so auto-end can end it' };
-      const r = await upstream(this.env, 'DELETE', path, { token });
+      if (!cred) return { status: 0, message: 'no token: sign in again so auto-end can end it' };
+      const r = await upstream(this.env, 'DELETE', path, { cred });
       return { status: r.status, message: (await r.text()).trim() };
     });
     await this.save(s);

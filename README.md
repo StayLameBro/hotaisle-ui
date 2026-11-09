@@ -61,8 +61,8 @@ browser ── /auth, /api, /records ──▶ Worker ──▶ admin.hotaisle.a
    └── everything else: static files   └── Account Durable Object (one per account): records, history, auto-end alarms
 ```
 
-- **Sign-in.** An API key is checked against `GET /user/`. An email sign-in starts with the address, keeps Hot Aisle's
-  private claim ticket inside the session, and waits until the emailed link is opened, then takes the session token.
+- **Sign-in.** An API key is checked against `GET /user/` and used as `Authorization: Token <key>`. Email sign-in uses
+  Hot Aisle's endpoints (below); its session token is used as `X-Session-Key: <token>`.
 - **The session** is one cookie: encrypted and authenticated with AES-GCM under a key derived from `SESSION_SECRET`,
   `HttpOnly`, `Secure`, `SameSite=Strict`. The browser holds only ciphertext; the token is decrypted in the Worker for
   the length of a request and never reaches the page.
@@ -77,19 +77,17 @@ browser ── /auth, /api, /records ──▶ Worker ──▶ admin.hotaisle.a
 
 ## Email sign-in
 
-Hot Aisle's API schema defines the email sign-in types (`EmailLoginRequest`, `EmailLoginResponse`,
-`EmailLoginClaimRequest`) but doesn't publish their endpoints yet. Once it does, set their paths in `wrangler.jsonc`:
+| Hot Aisle endpoint | |
+| --- | --- |
+| `POST /api/user/email/login/` `{email}` | sends the approval email; returns `{email, claim_ticket, expires_at}` |
+| `POST /api/user/email/wait/` `{claim_ticket}` | holds up to 20 s: `202` still waiting, `204` approved |
+| `POST /api/user/email/complete/` `{claim_ticket}` | `204` with the session in `X-New-Session-Key` and `X-Session-Key-Expires`; `401` if unapproved, expired or used |
 
-```jsonc
-"vars": {
-  "EMAIL_LOGIN_START_PATH": "/…",
-  "EMAIL_LOGIN_CLAIM_PATH": "/…"
-}
-```
+The claim ticket stays inside the encrypted session; the emailed link only approves the sign-in, in Hot Aisle's own
+page. The session cookie lasts as long as Hot Aisle's session (at most 30 days).
 
-Until both are set, the sign-in screen offers an API key only. `npm run dev:fake` runs the app against a local
-stand-in API that does the whole email flow (the "email" is a link printed in the terminal), and knows two API keys,
-`tok-alice` and `tok-bob`.
+`npm run dev:fake` runs the app against a local stand-in API that does the whole flow (the "email" is a link printed
+in the terminal) and knows two API keys, `tok-alice` and `tok-bob`.
 
 ## Develop
 
@@ -116,9 +114,9 @@ See [AGENTS.md](AGENTS.md) for a guide to the code.
 
 ## Not yet tested against a real account
 
-Everything has been run against sample data and a stand-in API built from the API documentation. Real accounts, the
-email sign-in endpoints, bare metal (reserve, install, power, reinstall, release) and the deploy button haven't been
-tried yet.
+Everything has been run against sample data and a stand-in API that follows Hot Aisle's documentation, including its
+email sign-in. Real accounts, the live email sign-in, bare metal (reserve, install, power, reinstall, release) and the
+deploy button haven't been tried yet.
 
 ## Credits
 

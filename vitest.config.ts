@@ -2,7 +2,7 @@
 // (worker/dev/fake-api.mjs) through the UPSTREAM binding, so nothing here touches the real API.
 import { cloudflareTest } from '@cloudflare/vitest-plugin';
 import { defineConfig } from 'vitest/config';
-import { FAKE_EMAIL_CLAIM, FAKE_EMAIL_START, fakeHotAisle } from './worker/dev/fake-api.mjs';
+import { fakeHotAisle } from './worker/dev/fake-api.mjs';
 
 const fake = fakeHotAisle();
 
@@ -14,8 +14,6 @@ export default defineConfig({
         bindings: {
           SESSION_SECRET: 'test-only-secret-0123456789abcdefghijklmnop',
           API_BASE: 'https://api.test/api',
-          EMAIL_LOGIN_START_PATH: FAKE_EMAIL_START,
-          EMAIL_LOGIN_CLAIM_PATH: FAKE_EMAIL_CLAIM,
         },
         serviceBindings: {
           UPSTREAM: async (req) => {

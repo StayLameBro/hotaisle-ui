@@ -55,7 +55,7 @@ describe('sign-in with an API key', () => {
     await bob.call('POST', '/auth/key', { key: 'tok-bob' });
     expect(JSON.parse((await alice.call('GET', '/api/teams/lab/whoami/')).text).who).toBe('alice@example.com');
     expect(JSON.parse((await bob.call('GET', '/api/teams/lab/whoami/')).text).who).toBe('bob@example.com');
-    expect(await upstreamCalls()).toContain('GET /teams/lab/whoami/ tok-bob');
+    expect(await upstreamCalls()).toContain('GET /teams/lab/whoami/ key:tok-bob');
   });
 
   it('signs out', async () => {
@@ -97,6 +97,7 @@ describe('sign-in with an email link', () => {
     expect(status0.email_login).toBe(true);
     const start = await b.call('POST', '/auth/email/start', { email: 'Carol@Example.com' });
     expect(start.status).toBe(200);
+    expect(await upstreamCalls()).toContain('POST /user/email/login/ -');
     expect(start.text).not.toContain('ticket');
     expect(b.cookie()).not.toContain('ticket');
     expect(JSON.parse((await b.call('GET', '/auth/status')).text).waiting_for_email.email).toBe('carol@example.com');
@@ -108,6 +109,35 @@ describe('sign-in with an email link', () => {
     expect(JSON.parse(done.text)).toMatchObject({ done: true, user: { email: 'carol@example.com' } });
     expect(JSON.parse((await b.call('GET', '/auth/status')).text)).toMatchObject({ signed_in: true, kind: 'email' });
     expect(JSON.parse((await b.call('GET', '/api/teams/lab/whoami/')).text).who).toBe('carol@example.com');
+    // a session from email sign-in goes out as X-Session-Key, never as an API key
+    const calls = await upstreamCalls();
+    expect(calls.filter((c) => c.startsWith('GET /teams/lab/whoami/ session:sess-')).length).toBeGreaterThan(0);
+    expect(calls.some((c) => c.startsWith('GET /teams/lab/whoami/ key:sess-'))).toBe(false);
+    expect(calls).toContain('POST /user/email/complete/ -');
+  });
+
+  it('auto-ends with the email session, sent as X-Session-Key', async () => {
+    const b = browser();
+    await b.call('POST', '/auth/email/start', { email: 'dave@example.com' });
+    await env.UPSTREAM!.fetch('https://api.test/api/__open?email=dave%40example.com');
+    expect(JSON.parse((await b.call('POST', '/auth/email/wait')).text).done).toBe(true);
+    await b.call('POST', '/records/machines', { team: 'lab', name: 'vm-d', launched: true, release_in_minutes: 60 });
+    const stub = env.ACCOUNTS.get(env.ACCOUNTS.idFromName(await accountId('dave@example.com')));
+    await runInDurableObject(stub, async (_o, state) => {
+      const s = (await state.storage.get<RecordsState>('records'))!;
+      s.machines['lab/vm-d'].release_at = new Date(Date.now() - 1000).toISOString();
+      await state.storage.put('records', s);
+      await state.storage.setAlarm(Date.now() + 3600_000);
+    });
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    expect((await upstreamCalls()).some((c) => c.startsWith('DELETE /teams/lab/virtual_machines/vm-d/ session:sess-'))).toBe(true);
+  });
+
+  it('never signs in from an unapproved link', async () => {
+    const b = browser();
+    await b.call('POST', '/auth/email/start', { email: 'erin@example.com' });
+    expect(JSON.parse((await b.call('POST', '/auth/email/wait')).text).done).toBe(false);
+    expect(JSON.parse((await b.call('GET', '/auth/status')).text).signed_in).toBe(false);
   });
 
   it('refuses something that is not an email address', async () => {
@@ -143,7 +173,7 @@ describe('records and auto-end', () => {
       await state.storage.setAlarm(Date.now() + 3600_000); // run below, on demand
     });
     expect(await runDurableObjectAlarm(stub)).toBe(true);
-    expect(await upstreamCalls()).toContain('DELETE /teams/lab/virtual_machines/vm9/ tok-alice');
+    expect(await upstreamCalls()).toContain('DELETE /teams/lab/virtual_machines/vm9/ key:tok-alice');
     expect((await b.call('GET', '/records/machines?team=lab')).text).not.toContain('vm9');
     const history = JSON.parse((await b.call('GET', '/records/history?team=lab')).text);
     expect(history[0]).toMatchObject({ name: 'vm9', ended_by: 'auto-end', minimum_applied: true });
