@@ -1,20 +1,26 @@
-# Weekly pull requests to update the pinned actions, base images and npm packages; CI tests each one.
+# Monthly, one pull request per ecosystem, minor and patch versions only (major upgrades are done by hand).
+# CI tests each one.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-  - package-ecosystem: docker
-    directory: /
-    schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: npm
-    directory: /web
+    directories: [/, /web]
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-  - package-ecosystem: gomod
-    directory: /
-    schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      npm:
+        patterns: ['*']
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']

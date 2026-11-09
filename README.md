@@ -1,142 +1,124 @@
 # hotaisle-ui
 
-A web app for renting [Hot Aisle](https://hotaisle.xyz) AMD MI300X GPUs. Pick a size, hold the launch button, SSH in,
-end it when you're done. Next to the controls is a live isometric drawing of the Dell XE9680 servers your GPUs are on.
+A web app for renting [Hot Aisle](https://hotaisle.xyz) AMD MI300X GPUs. Sign in with your email or an API key, pick a
+size, hold the launch button, SSH in, end it when you're done. Next to the controls is a live isometric drawing of the
+Dell XE9680 servers your GPUs are on.
 
-Built on the public [Hot Aisle API](https://admin.hotaisle.app/api/docs/). Not affiliated with Hot Aisle.
+It runs on Cloudflare Workers: the Worker serves the app and is its backend. Built on the public
+[Hot Aisle API](https://admin.hotaisle.app/api/docs/). Not affiliated with Hot Aisle.
 
 ![A running 4× MI300X machine with its SSH command and live meters, and its server's GPU tray pulled out](docs/machine.jpg)
 
 ## Try it
 
-Download a binary from the [latest release](https://github.com/StayLameBro/hotaisle-ui/releases/latest) and run it:
-
-```sh
-# macOS, Apple silicon (also: darwin-amd64, linux-amd64, linux-arm64, windows-amd64.exe)
-curl -Lo hotaisle-ui https://github.com/StayLameBro/hotaisle-ui/releases/latest/download/hotaisle-ui-darwin-arm64
-chmod +x hotaisle-ui
-./hotaisle-ui --demo     # sample data, nothing is billed
-./hotaisle-ui            # your Hot Aisle account
-```
-
-Each release has a `SHA256SUMS` file, and build provenance showing it was built by this repository's release workflow
-from its source: `gh attestation verify hotaisle-ui -R StayLameBro/hotaisle-ui`.
-
-It starts a server on `127.0.0.1` and opens your browser. To build from source (Go 1.24+, Node 20+):
+Run it locally with sample data (Node 20+):
 
 ```sh
 git clone https://github.com/StayLameBro/hotaisle-ui && cd hotaisle-ui
-make demo
+npm install
+cp .dev.vars.example .dev.vars        # then put 32+ random characters in it: openssl rand -base64 32
+npm run dev                           # http://localhost:8787, then "Look around with sample data"
 ```
+
+`http://localhost:8787/?demo` opens straight into sample data. Nothing is billed; it all runs in the browser tab.
+
+## Deploy
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/StayLameBro/hotaisle-ui)
+
+Or from your machine, with a Cloudflare account:
+
+```sh
+npx wrangler secret put SESSION_SECRET   # 32+ random characters
+npm run build && npm run deploy
+```
+
+The Worker needs one secret, `SESSION_SECRET`, and uses one Durable Object class (`Account`). Workers Free is enough.
 
 ## Features
 
+- Sign in with an emailed link or an API key. Passkeys once Hot Aisle's API supports them.
 - Virtual machines with 1, 2 or 4 MI300X, or a whole 8-GPU server as bare metal, with live availability and prices.
 - Image choice: standard, Hot Aisle's vLLM template, or your own cloud-init URL.
-- Auto-end after 1, 2, 4 or 8 hours, run by the local server even with the browser closed.
+- Auto-end after 1, 2, 4 or 8 hours, run by the Worker, with every browser closed.
 - Machine cards with boot progress, the SSH command (Copy, Open in Terminal), and running time and cost.
 - Receipts when a machine ends, and a history of past runs that you can open and launch again.
-- SSH key management: add from `~/.ssh` in one click (key comments are never uploaded), paste, or remove.
+- SSH keys: paste a public key, or remove one.
 - Balance, spend per hour and time remaining; add credits through Hot Aisle's Stripe checkout.
 - The drawing: your servers' GPU trays, with each GPU lit by state, every fan turning (WebGL), and labels on your
   servers. Point at any part to see what it is.
 - Keyboard: `1` `2` `4` `8` pick a size, hold `L` to launch, `C` copies the newest SSH command, `Esc` goes back.
 - Light and dark themes, sounds you can turn off, and reduced motion respected.
-- Sample-data mode with a built-in copy of the API.
+- Sample data: a built-in copy of the API that runs in the browser.
 
 ![Choosing a new machine: sizes and prices, with the server it would go to](docs/order.jpg)
 
-## Signing in
-
-If you use the [Hot Aisle CLI](https://github.com/hotaisle/hotaisle-cli), you're already signed in: the app reads the
-same `~/.hotaisle/config.json` (or `$HOTAISLE_CONFIG_FILE`, `$HOTAISLE_API_TOKEN`, `$HOTAISLE_DEFAULT_TEAM`).
-Otherwise it asks for an API key (create one with `ssh admin.hotaisle.app`), checks it, and saves it to that file
-(mode 0600).
-
-## Security
-
-The Hot Aisle API doesn't allow browser cross-origin requests, and an API key shouldn't be in a web page, so the
-browser talks only to the local server, which adds the key and forwards to `admin.hotaisle.app/api`. The key never
-reaches the page. The local server:
-
-- listens on `127.0.0.1` only and rejects any other `Host` header (DNS rebinding);
-- requires a per-launch secret, exchanged by the printed link for an `HttpOnly`, `SameSite=Strict` cookie;
-- requires a custom header on every API call and refuses cross-origin requests;
-- serves the page under a strict Content Security Policy.
-
-## Hosting
-
-`--host ADDR` serves the app to many people. Each visitor signs in with their own API key, which is kept in the
-server's memory for that session only: never written to disk, never logged, never sent to the page.
-
-```sh
-docker run -p 8080:8080 ghcr.io/staylamebro/hotaisle-ui                                   # sign-in
-docker run -p 8080:8080 ghcr.io/staylamebro/hotaisle-ui --demo                            # sample data only
-docker run -p 8080:8080 -v hotaisle-ui:/data ghcr.io/staylamebro/hotaisle-ui --data /data # keep records
-```
-
-Without Docker: `hotaisle-ui --host :8080`. Run it behind HTTPS, as a single instance (sessions are in memory).
-
-- Sessions use an `HttpOnly`, `SameSite=Strict` cookie, `Secure` over HTTPS. Restarting the server signs everyone
-  out; Sign out in Settings forgets the key immediately.
-- The host's own Hot Aisle login and `~/.ssh` are never read.
-- Sample data is a separate sandbox per visitor. `--demo` makes the whole site sample data and refuses real keys.
-- Machine records (launch times, auto-end timers, history) belong to the account. With `--data DIR` they're stored
-  there, one file per account named by a hash of its email, without keys; otherwise in memory.
-- Auto-end needs the key to end a machine, so it stays in memory while the account has a session or a pending timer.
-  After a restart, a pending timer waits until its owner signs in again, and says so on the machine.
-
-| Flag | Environment | |
-| --- | --- | --- |
-| `--host ADDR` | `HOTAISLE_UI_HOST` | serve on `ADDR` (`:8080`); `auto` uses `:$PORT`, or `:8080` |
-| `--demo` | `HOTAISLE_UI_DEMO=1` | sample data only, real keys refused |
-| `--data DIR` | `HOTAISLE_UI_DATA` | where to keep machine records (never keys) |
-| `--public-host NAME` | `HOTAISLE_UI_PUBLIC_HOST` | the only host name to answer to |
-| `--api URL` | `HOTAISLE_API_BASE` | API base (default `https://admin.hotaisle.app/api`) |
-
-The Docker image runs `--host auto` as a non-root user on a distroless base; arguments after the image name are
-added.
-
-## Flags
+## How it works
 
 ```
---demo            start with sample data
---port N          fixed port (default: any free port)
---no-open         print the link instead of opening a browser
---config-file P   Hot Aisle CLI config file
---api URL         API base (default https://admin.hotaisle.app/api, or $HOTAISLE_API_BASE)
---static DIR      serve the front end from DIR instead of the embedded copy (development)
---host ADDR       serve many people (see Hosting)
+browser ── /auth, /api, /records ──▶ Worker ──▶ admin.hotaisle.app/api
+   │                                   │
+   └── everything else: static files   └── Account Durable Object (one per account): records, history, auto-end alarms
 ```
+
+- **Sign-in.** An API key is checked against `GET /user/`. An email sign-in starts with the address, keeps Hot Aisle's
+  private claim ticket inside the session, and waits until the emailed link is opened, then takes the session token.
+- **The session** is one cookie: encrypted and authenticated with AES-GCM under a key derived from `SESSION_SECRET`,
+  `HttpOnly`, `Secure`, `SameSite=Strict`. The browser holds only ciphertext; the token is decrypted in the Worker for
+  the length of a request and never reaches the page.
+- **API calls.** The Hot Aisle API doesn't answer browsers directly, so the page calls `/api/*` and the Worker forwards
+  it with the session's token.
+- **Records.** Launch times, auto-end timers and history live in a Durable Object per account, named by a hash of the
+  account's email. Each auto-end timer is a Durable Object alarm. To end a machine on time it keeps the latest token,
+  encrypted at rest, only while a timer is pending.
+- **Guard.** `/auth`, `/api` and `/records` require `X-Requested-With: hotaisle-ui` and refuse cross-origin requests;
+  with the `SameSite=Strict` cookie, other sites can't make these calls. Pages are served with a strict Content
+  Security Policy.
+
+## Email sign-in
+
+Hot Aisle's API schema defines the email sign-in types (`EmailLoginRequest`, `EmailLoginResponse`,
+`EmailLoginClaimRequest`) but doesn't publish their endpoints yet. Once it does, set their paths in `wrangler.jsonc`:
+
+```jsonc
+"vars": {
+  "EMAIL_LOGIN_START_PATH": "/…",
+  "EMAIL_LOGIN_CLAIM_PATH": "/…"
+}
+```
+
+Until both are set, the sign-in screen offers an API key only. `npm run dev:fake` runs the app against a local
+stand-in API that does the whole email flow (the "email" is a link printed in the terminal), and knows two API keys,
+`tok-alice` and `tok-bob`.
 
 ## Develop
 
 ```sh
-make build                      # web app + binary -> bin/hotaisle-ui
-make test                       # go vet, go test, TypeScript check
-make test-ui                    # layout and motion checks in headless Chrome
-cd web && npm run watch         # rebuild the front end on save, then:
-./bin/hotaisle-ui --demo --static web/dist
-make release                    # macOS, Linux and Windows binaries in bin/
+npm run dev          # build, then wrangler dev on http://localhost:8787
+npm run dev:fake     # the same against a local stand-in API, to try sign-in
+npm test             # Worker tests, in the Workers runtime, against the stand-in API
+npm run typecheck    # Worker and app
+npm run test:ui      # layout and motion checks in headless Chrome, at three window sizes
+cd web && npm run watch   # rebuild the app on save while wrangler dev runs
 ```
 
-- `main.go`: flags and start-up.
-- `internal/server`: the local server, proxy and guard; `hosted.go` is the hosted mode.
-- `internal/config`: the CLI-compatible config.
-- `internal/state`: launch times, auto-end timers and history (`~/.hotaisle/ui-state.json`, mode 0600).
-- `internal/demo`: the sample-data API.
-- `web/`: React + TypeScript front end, built with Vite and embedded with `go:embed`.
+- `worker/src/index.ts`: routes, the guard, sign-in and the API proxy. `session.ts`: the encrypted cookie.
+  `account.ts`: the per-account Durable Object. `hotaisle.ts`: calls the Worker makes to Hot Aisle, including the
+  email sign-in adapter.
+- `shared/records.ts`: machine records, history and auto-end, used by the Worker and by sample data.
+- `web/`: the React + TypeScript app, built with Vite. `web/src/demo/` is the sample-data API.
 - `web/src/iso/`: the drawing. `hall.ts` builds the racks and GPU trays, `chip.ts` the MI300X close-up, `fanGL.ts`
   the WebGL fans; `Stage.tsx` animates them.
-- `web/tests/stability.mjs`: runs the real binary in headless Chrome at three window sizes and fails on any layout
-  shift, overflow or console error. `SHOTS=dir` saves screenshots.
+- `web/tests/stability.mjs`: runs the app with `wrangler dev` in headless Chrome and fails on any layout shift,
+  overflow or console error. `SHOTS=dir` saves screenshots.
 
 See [AGENTS.md](AGENTS.md) for a guide to the code.
 
 ## Not yet tested against a real account
 
-Everything has been run against the sample-data API, which follows the API documentation. Bare metal (reserve,
-install, power, reinstall, release) and the VM web console haven't been run against a real account yet.
+Everything has been run against sample data and a stand-in API built from the API documentation. Real accounts, the
+email sign-in endpoints, bare metal (reserve, install, power, reinstall, release) and the deploy button haven't been
+tried yet.
 
 ## Credits
 

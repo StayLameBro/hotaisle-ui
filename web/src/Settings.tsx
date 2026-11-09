@@ -1,4 +1,4 @@
-import { api, type LocalStatus, type Team } from './api';
+import { api, type Status, type Team } from './api';
 import { IMAGES, RELEASE_CHOICES, usePrefs, type Image, type Theme } from './prefs';
 
 function Seg<T extends string | number>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
@@ -13,7 +13,7 @@ function Seg<T extends string | number>({ label, value, options, onChange }: { l
   );
 }
 
-export function SettingsView({ status, teams, team, onTeam, onDemo }: { status: LocalStatus; teams: Team[]; team: Team; onTeam: (h: string) => void; onDemo: (on: boolean) => void }) {
+export function SettingsView({ status, teams, team, onTeam, onDemo }: { status: Status; teams: Team[]; team: Team; onTeam: (h: string) => void; onDemo: (on: boolean) => void }) {
   const [p, set] = usePrefs();
   const notifyOn = async (on: boolean) => {
     if (on && 'Notification' in window && Notification.permission !== 'granted') {
@@ -110,25 +110,19 @@ export function SettingsView({ status, teams, team, onTeam, onDemo }: { status: 
             </select>
           </div>
         )}
-        {!status.demo_only && (
-          <label className="check">
-            <input type="checkbox" checked={status.demo} onChange={(e) => onDemo(e.target.checked)} />
-            <span>Use sample data instead of my account</span>
-          </label>
-        )}
+        <label className="check">
+          <input type="checkbox" checked={status.demo} onChange={(e) => onDemo(e.target.checked)} />
+          <span>Use sample data instead of my account</span>
+        </label>
         <p className="muted small">
-          {status.demo_only
-            ? 'This is a demo with sample data, a built-in copy of the API. Nothing is billed. To use your own account, run hotaisle-ui on your computer.'
-            : status.demo
-              ? 'Sample data is a built-in copy of the API. Nothing is billed.'
-              : status.hosted
-                ? "Signed in for this session. Your key is kept in this server's memory, never on disk."
-                : status.token_source === 'env'
-                  ? 'Signed in with $HOTAISLE_API_TOKEN.'
-                  : 'Signed in with the key in the hotaisle CLI config file.'}{' '}
+          {status.demo
+            ? 'Sample data is a built-in copy of the API, running in this tab. Nothing is billed.'
+            : status.kind === 'email'
+              ? 'Signed in with an emailed link.'
+              : 'Signed in with an API key.'}{' '}
           hotaisle-ui {status.version}, community-built on the public Hot Aisle API.
         </p>
-        {status.hosted && status.connected && !status.demo_only && (
+        {status.signed_in && !status.demo && (
           <button
             className="btn"
             onClick={() => {

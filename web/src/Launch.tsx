@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, APIError, type Balance, type LocalKey, type Offer, type SSHKey, type Team, type VM } from './api';
+import { api, APIError, type Balance, type Offer, type SSHKey, type Team, type VM } from './api';
 import { gb, hbm, hoursOr, keyLabel, money } from './format';
 import { IMAGES, RELEASE_CHOICES, VLLM_URL, type Image } from './prefs';
 import type { Signal } from './signal';
@@ -247,16 +247,11 @@ export function OrderView({
   );
 }
 
-/** SSH keys: the ones on the account, and one-click adds from ~/.ssh. */
-export function KeysView({ keys, refresh, hosted = false }: { keys?: SSHKey[]; refresh: () => Promise<void>; hosted?: boolean }) {
+/** SSH keys: the ones on the account; add one by pasting its public half. */
+export function KeysView({ keys, refresh }: { keys?: SSHKey[]; refresh: () => Promise<void> }) {
   const toast = useToast();
-  const [local, setLocal] = useState<LocalKey[]>();
   const [paste, setPaste] = useState('');
   const [busy, setBusy] = useState('');
-
-  useEffect(() => {
-    api.localKeys().then(setLocal).catch(() => setLocal([]));
-  }, []);
 
   const add = async (authorized: string, label: string) => {
     setBusy(label);
@@ -289,8 +284,6 @@ export function KeysView({ keys, refresh, hosted = false }: { keys?: SSHKey[]; r
       setRemoving('');
     }
   };
-  const registered = new Set((keys ?? []).map((k) => k.fingerprint));
-  const candidates = (local ?? []).filter((k) => !registered.has(k.fingerprint));
 
   return (
     <div className="stack">
@@ -328,42 +321,18 @@ export function KeysView({ keys, refresh, hosted = false }: { keys?: SSHKey[]; r
           <p className="muted">None yet. Add one below; every machine you launch will accept it.</p>
         )}
       </div>
-      {candidates.length > 0 && (
-        <div className="group">
-          <h2 className="group-h">Add from this computer</h2>
-          <ul className="rows">
-            {candidates.map((k) => {
-              const name = k.file.replace('~/.ssh/', '');
-              return (
-                <li key={k.fingerprint}>
-                  <button className="row-item act" disabled={!!busy} onClick={() => add(k.authorized_key, name)}>
-                    <span className="mono">{name}</span>
-                    <span className="muted">{busy === name ? 'Adding' : 'Add'}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
       <div className="group">
-        <h2 className="group-h">Or paste a public key</h2>
+        <h2 className="group-h">Add a public key</h2>
         <div className="pasterow">
           <input placeholder="ssh-ed25519 AAAA…" value={paste} onChange={(e) => setPaste(e.target.value)} aria-label="Public key" spellCheck={false} />
           <button className="btn" disabled={!paste.trim() || !!busy} onClick={() => add(paste, 'your key')}>
             Add
           </button>
         </div>
-        {local && local.length === 0 &&
-          (hosted ? (
-            <p className="muted small">
-              Paste the public half: the contents of <code>~/.ssh/id_ed25519.pub</code>. No key yet? Create one with <code>ssh-keygen -t ed25519</code>.
-            </p>
-          ) : (
-            <p className="muted small">
-              No keys in ~/.ssh yet. Create one with <code>ssh-keygen -t ed25519</code>.
-            </p>
-          ))}
+        <p className="muted small">
+          Paste the public half, the contents of <code>~/.ssh/id_ed25519.pub</code> (on a Mac: <code>pbcopy &lt; ~/.ssh/id_ed25519.pub</code>). No key yet? Create
+          one with <code>ssh-keygen -t ed25519</code>.
+        </p>
       </div>
     </div>
   );

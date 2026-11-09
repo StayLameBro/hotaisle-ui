@@ -1,0 +1,4 @@
+# Secrets for the Worker. For `npm run dev`, copy this file to .dev.vars and fill it in; for a deployed
+# Worker, `npx wrangler secret put SESSION_SECRET`.
+# 32 or more random characters, e.g. from `openssl rand -base64 32`.
+SESSION_SECRET=

@@ -53,20 +53,18 @@ export type Balance = {
   bare_metal_server_count: number;
 };
 export type SSHKey = { type: string; public_key: string; fingerprint: string; comment?: string };
-export type LocalKey = { file: string; type: string; comment: string; fingerprint: string; authorized_key: string };
-export type LocalStatus = {
-  connected: boolean;
-  token_source: string;
-  default_team: string;
-  team_source: string;
-  config_path: string;
-  demo: boolean;
+/** Who is signed in, as the Worker sees it, and whether this tab is showing sample data. */
+export type Status = {
+  signed_in: boolean;
+  kind?: 'key' | 'email' | 'passkey';
+  /** An email sign-in waiting for its link to be opened. */
+  waiting_for_email?: { email: string; expires_at: string };
+  /** Email sign-in is available (Hot Aisle's API must publish it, and the Worker be told its paths). */
+  email_login: boolean;
+  passkeys: boolean;
   version: string;
-  api_base: string;
-  /** Served by a hosted copy for many people: the key is kept for this session, in the server's memory. */
-  hosted?: boolean;
-  /** A public demo: sample data only. */
-  demo_only?: boolean;
+  /** This tab is showing sample data: everything happens in the browser, nothing is billed. */
+  demo: boolean;
 };
 
 /** What this app remembers about a machine (the API doesn't keep launch time or timers). */
@@ -80,7 +78,7 @@ export type MachineRecord = {
   last_error?: string;
 };
 
-/** A machine that has ended, as this app saw it. Kept by the local server between sessions. */
+/** A machine that has ended, as this app saw it. Kept with the account (or in the tab, for sample data). */
 export type Ended = {
   team: string;
   name: string;
@@ -110,7 +108,37 @@ export class APIError extends Error {
   }
 }
 
+// ---------------------------------------------------------------- sample data
+// It runs in the browser (demo/api.ts) and is loaded only when used. It starts from ?demo in the address, or
+// from "Look around with sample data", and lasts for the tab.
+const DEMO_KEY = 'hotaisle-ui:demo';
+let demo = (() => {
+  try {
+    if (new URLSearchParams(location.search).has('demo')) sessionStorage.setItem(DEMO_KEY, '1');
+    return sessionStorage.getItem(DEMO_KEY) === '1';
+  } catch {
+    return new URLSearchParams(location.search).has('demo');
+  }
+})();
+export const isDemo = () => demo;
+export async function setDemo(on: boolean) {
+  demo = on;
+  try {
+    if (on) sessionStorage.setItem(DEMO_KEY, '1');
+    else sessionStorage.removeItem(DEMO_KEY);
+  } catch {
+    /* lasts until reload */
+  }
+  if (!on) (await import('./demo/api')).resetDemo();
+}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  if (demo && !path.startsWith('/auth/')) {
+    const { demoFetch } = await import('./demo/api');
+    const r = await demoFetch(method, path, body);
+    if (r.status >= 400) throw new APIError(r.status, r.text ?? 'error');
+    return r.body as T;
+  }
   const res = await fetch(path, {
     method,
     headers: {
@@ -162,18 +190,27 @@ function metalVM(b: Metal): VM {
 const POWER: Record<string, string> = { start: 'power_on', shutdown: 'graceful_shutdown', stop: 'force_shutdown', reboot: 'warm_reboot', 'hard-reset': 'cold_reboot' };
 
 export const api = {
-  status: () => call<LocalStatus>('GET', '/local/status'),
-  setDemo: (on: boolean) => call<{ demo: boolean }>('POST', '/local/demo', { on }),
-  signOut: () => call<{ ok: boolean }>('POST', '/local/signout'),
-  saveToken: (token: string) => call<{ user: User; teams: Team[] }>('POST', '/local/token', { token }),
-  saveTeam: (team: string) => call<{ saved: boolean }>('POST', '/local/team', { team }),
-  localKeys: () => call<LocalKey[]>('GET', '/local/pubkeys'),
-  records: (team: string) => call<MachineRecord[]>('GET', `/local/machines?team=${encodeURIComponent(team)}`),
+  status: async (): Promise<Status> => {
+    const s = await call<Omit<Status, 'demo'>>('GET', '/auth/status').catch((e) => {
+      // sample data works without the backend (a static preview, say)
+      if (demo) return { signed_in: false, email_login: false, passkeys: false, version: 'dev' };
+      throw e;
+    });
+    return { ...s, demo };
+  },
+  /** Signs in with an API key; the Worker checks it with Hot Aisle and keeps it out of the page. */
+  signInWithKey: (key: string) => call<{ user: User; teams: Team[] }>('POST', '/auth/key', { key }),
+  /** Emails a sign-in link. */
+  emailStart: (email: string) => call<{ email: string; expires_at: string }>('POST', '/auth/email/start', { email }),
+  /** Whether the emailed link has been opened yet; once it has, the session is signed in. */
+  emailWait: () => call<{ done: boolean; user?: User; teams?: Team[] }>('POST', '/auth/email/wait'),
+  signOut: () => call<{ ok: boolean }>('POST', '/auth/signout'),
+  records: (team: string) => call<MachineRecord[]>('GET', `/records/machines?team=${encodeURIComponent(team)}`),
   record: (body: { team: string; name: string; launched?: boolean; image?: string; price_cents?: number; release_in_minutes?: number; gpus?: string; metal?: boolean }) =>
-    call<MachineRecord>('POST', '/local/machines', body),
-  prune: (team: string, names: string[]) => call<void>('POST', '/local/machines/prune', { team, names }),
-  history: (team: string) => call<Ended[]>('GET', `/local/history?team=${encodeURIComponent(team)}`),
-  addHistory: (e: Ended) => call<{ ok: boolean }>('POST', '/local/history', e),
+    call<MachineRecord>('POST', '/records/machines', body),
+  prune: (team: string, names: string[]) => call<void>('POST', '/records/machines/prune', { team, names }),
+  history: (team: string) => call<Ended[]>('GET', `/records/history?team=${encodeURIComponent(team)}`),
+  addHistory: (e: Ended) => call<{ ok: boolean }>('POST', '/records/history', e),
 
   user: () => call<{ user: User; teams: Team[] }>('GET', '/api/user/'),
   teams: () => call<Team[]>('GET', '/api/teams/'),

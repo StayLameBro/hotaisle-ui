@@ -1,0 +1,28 @@
+{
+  "name": "hotaisle-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm --prefix web ci --no-audit --no-fund && npm --prefix web run build",
+    "dev": "npm run build && wrangler dev",
+    "dev:fake": "npm run build && node worker/dev/fake-api.mjs",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc -p worker && npm --prefix web run typecheck",
+    "test": "vitest run",
+    "test:ui": "npm run build && node web/tests/stability.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.5.0",
+    "@cloudflare/workers-types": "5.20261102.1",
+    "typescript": "5.6.3",
+    "vitest": "4.1.11",
+    "wrangler": "4.156.2"
+  },
+  "cloudflare": {
+    "bindings": {
+      "SESSION_SECRET": {
+        "description": "Encrypts sign-in sessions and the tokens kept for auto-end. 32 or more random characters: `openssl rand -base64 32`."
+      }
+    }
+  }
+}

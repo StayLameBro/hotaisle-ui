@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, APIError, type Ended, type LocalStatus, type MachineRecord, type Team, type User, type VM, type VMState } from './api';
+import { api, APIError, setDemo as setDemoMode, type Ended, type MachineRecord, type Status, type Team, type User, type VM, type VMState } from './api';
 import { Connect } from './Connect';
 import { duration, money, specRows } from './format';
 import { ImageView, KeysView, OrderView, sizesOf, type LaunchMeta, type Order } from './Launch';
@@ -12,35 +12,50 @@ import { signal } from './signal';
 import { NEW, placeNew, Stage, type StageMachine, type StageState } from './Stage';
 import { usePoll, useToast } from './ui';
 
+// The team machines are billed to, remembered in this browser.
+const TEAM_KEY = 'hotaisle-ui:team';
+const savedTeam = () => {
+  try {
+    return localStorage.getItem(TEAM_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export function App() {
   const toast = useToast();
   const [prefs] = usePrefs();
-  const [status, setStatus] = useState<LocalStatus>();
+  const [status, setStatus] = useState<Status>();
   const [me, setMe] = useState<{ user: User; teams: Team[] }>();
   const [teamHandle, setTeamHandle] = useState<string>();
   const [loadErr, setLoadErr] = useState('');
-  // this page's session belongs to an earlier run of hotaisle-ui (or none): only the printed link fixes that
-  const [stale, setStale] = useState(false);
 
   useEffect(() => applyTheme(prefs.theme), [prefs.theme]);
 
   const boot = useCallback(async () => {
     setLoadErr('');
-    setStale(false);
     try {
-      const st = await api.status().catch((e) => {
-        if (e instanceof APIError && e.status === 401) setStale(true);
-        throw e;
-      });
-      setStatus(st);
-      if (!st.connected && !st.demo) {
+      let st = await api.status();
+      if (!st.signed_in && !st.demo) {
+        setStatus(st);
         setMe(undefined);
         return;
       }
-      const u = await api.user();
+      const u = await api.user().catch(async (e) => {
+        // a session Hot Aisle no longer accepts (the key was deleted, the session ended): sign in again
+        if (e instanceof APIError && e.status === 401 && !st.demo) {
+          await api.signOut().catch(() => undefined);
+          st = { ...st, signed_in: false };
+          return undefined;
+        }
+        throw e;
+      });
+      setStatus(st);
       setMe(u);
+      if (!u) return;
       const teams = u.teams.filter((t) => !t.invitation);
-      setTeamHandle(teams.find((t) => t.handle === st.default_team)?.handle ?? (teams.length === 1 ? teams[0].handle : undefined));
+      const saved = savedTeam();
+      setTeamHandle(teams.find((t) => t.handle === saved)?.handle ?? (teams.length === 1 ? teams[0].handle : undefined));
     } catch (e) {
       setLoadErr((e as Error).message);
     }
@@ -48,30 +63,21 @@ export function App() {
   useEffect(() => void boot(), [boot]);
 
   const setDemo = async (on: boolean) => {
-    await api.setDemo(on);
+    await setDemoMode(on);
     setMe(undefined);
     setTeamHandle(undefined);
     await boot();
   };
-  const pickTeam = async (h: string) => {
+  const pickTeam = (h: string) => {
     setTeamHandle(h);
-    if (!status?.demo) await api.saveTeam(h).catch(() => undefined);
+    if (!status?.demo)
+      try {
+        localStorage.setItem(TEAM_KEY, h);
+      } catch {
+        /* remembered for this visit only */
+      }
   };
 
-  if (stale)
-    return (
-      <main className="center">
-        <div className="lone">
-          <h1>Open the link from your terminal</h1>
-          <p className="lede">This page is from an earlier run of hotaisle-ui. Open the link it printed when it started, or run it again.</p>
-          <div className="row">
-            <button className="btn primary" onClick={() => void boot()}>
-              Try again
-            </button>
-          </div>
-        </div>
-      </main>
-    );
   if (loadErr)
     return (
       <main className="center">
@@ -91,18 +97,18 @@ export function App() {
         </div>
       </main>
     );
-  if (!status || ((status.connected || status.demo) && !me))
+  if (!status || ((status.signed_in || status.demo) && !me))
     return (
       <main className="center">
         <span className="loading" aria-label="Loading" />
       </main>
     );
-  if (!status.connected && !status.demo)
+  if (!status.signed_in && !status.demo)
     return (
       <Connect
         status={status}
         onConnected={() => {
-          toast('Connected.');
+          toast('Signed in.');
           void boot();
         }}
         onDemo={() => void setDemo(true)}
@@ -117,7 +123,7 @@ export function App() {
         <div className="lone">
           <h1>Which team pays?</h1>
           <p className="lede">
-            {teams.length ? 'Machines are billed to a team. You can change this later in Settings.' : "This API key isn't on a team yet. Create or join one with ssh admin.hotaisle.app."}
+            {teams.length ? 'Machines are billed to a team. You can change this later in Settings.' : "This account isn't on a team yet. Create or join one with ssh admin.hotaisle.app."}
           </p>
           <div className="picklist">
             {teams.map((t) => (
@@ -152,7 +158,7 @@ const chevronRight = (
 function Console({
   status, teams, team, onTeam, onDemo,
 }: {
-  status: LocalStatus;
+  status: Status;
   teams: Team[];
   team: Team;
   onTeam: (h: string) => void;
@@ -568,7 +574,7 @@ function Console({
     sub = 'Every machine you launch accepts these keys.';
     body = (
       <>
-        <KeysView keys={keys.data} refresh={keys.refresh} hosted={!!status.hosted && !status.demo} />
+        <KeysView keys={keys.data} refresh={keys.refresh} />
         <div className="foot">
           <button className="btn big" onClick={back}>
             Done

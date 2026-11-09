@@ -1,0 +1,26 @@
+// hotaisle-ui on Cloudflare Workers. `npm run dev` runs it locally; `npm run deploy` publishes it.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hotaisle-ui",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // the backend's paths go to the Worker; everything else is served straight from the static files
+    "run_worker_first": ["/auth/*", "/api/*", "/records/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ACCOUNTS", "class_name": "Account" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Account"] }],
+  "vars": {
+    "API_BASE": "https://admin.hotaisle.app/api"
+    // Email sign-in, once the API publishes its endpoints (paths relative to API_BASE):
+    // "EMAIL_LOGIN_START_PATH": "/…",
+    // "EMAIL_LOGIN_CLAIM_PATH": "/…"
+  },
+  // SESSION_SECRET is a secret, not a var: `npx wrangler secret put SESSION_SECRET` (32+ random characters).
+  "observability": { "enabled": true }
+}

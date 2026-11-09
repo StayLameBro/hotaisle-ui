@@ -11,21 +11,29 @@
 // Steps that change the view on purpose (opening another screen, expanding a machine) are marked
 // `moves` and only checked for errors.
 //
-//   node web/tests/stability.mjs            uses ./bin/hotaisle-ui and finds Chrome
+//   npm run test:ui                          builds the app, runs it with `wrangler dev` on sample data, and finds Chrome
 //   CHROME=/path/to/chrome node web/tests/stability.mjs
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const bin = path.join(root, 'bin', 'hotaisle-ui');
+const wrangler = path.join(root, 'node_modules', '.bin', 'wrangler');
+const freePort = () => new Promise((r) => { const srv = net.createServer(); srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => r(port)); }); });
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hotaisle-ui-stability-'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const children = [];
 const cleanup = () => {
-  for (const c of children) c.kill('SIGTERM');
+  for (const c of children) {
+    try {
+      process.kill(-c.pid, 'SIGTERM'); // a detached group: wrangler and its runtime
+    } catch {
+      c.kill('SIGTERM');
+    }
+  }
   fs.rmSync(tmp, { recursive: true, force: true });
 };
 process.on('exit', cleanup);
@@ -216,9 +224,12 @@ const DRAWING = `(() => {
 
 async function run(viewport) {
   const chrome = findChrome();
-  const server = spawn(bin, ['--demo', '--no-open', '--port', '0', '--config-file', path.join(tmp, `config-${viewport.name}.json`)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  // the app as it runs on Cloudflare, locally; sample data needs no account
+  const port = await freePort();
+  const server = spawn(wrangler, ['dev', '--ip', '127.0.0.1', '--port', String(port), '--var', 'SESSION_SECRET:stability-test-secret-0123456789abcdef', '--persist-to', path.join(tmp, 'wrangler-' + viewport.name)], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   children.push(server);
-  const [link] = await Promise.race([waitForLine(server, 'stdout', /http:\/\/127\.0\.0\.1:\d+\/open\?k=\w+/, 'the server link'), waitForLine(server, 'stderr', /http:\/\/127\.0\.0\.1:\d+\/open\?k=\w+/, 'the server link')]);
+  await Promise.race([waitForLine(server, 'stdout', /Ready on/, 'wrangler dev'), waitForLine(server, 'stderr', /Ready on/, 'wrangler dev')]);
+  const link = `http://127.0.0.1:${port}/?demo`;
   const args = [`--user-data-dir=${path.join(tmp, 'chrome-' + viewport.name)}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--hide-scrollbars', 'about:blank'];
   if (!chrome.shell) args.unshift('--headless=new');
   const browser = spawn(chrome.path, args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -354,8 +365,12 @@ async function run(viewport) {
     await hover('.plate');
     await sleep(200);
   });
-  await step('open SSH keys', () => click('.picker-btn.attention'), { moves: true, expect: '.row-item.act' });
-  await step('add a key from this computer', () => click('.row-item.act'), { moves: true, settle: 900 });
+  await step('open SSH keys', () => click('.picker-btn.attention'), { moves: true, expect: '.pasterow input' });
+  await step('paste a public key', async () => {
+    await click('.pasterow input');
+    await page('Input.insertText', { text: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBQxuQk1cH8WkaQ3w6cABiyfRruEmtY280ryshxbN5f3 laptop' });
+    await click('.pasterow .btn');
+  }, { moves: true, settle: 900, expect: '.row-item.key' });
   await step('go back', () => key('Escape'), { moves: true, expect: '.go .hold' });
   await step('hold to launch', () => hold('.go .hold'), { moves: true, settle: 900, expect: '.trip' });
   await step('booting, then ready', async () => {}, { settle: 6500, expect: '.trip .ssh.ready' });
@@ -409,12 +424,16 @@ async function run(viewport) {
   await step('time passes', async () => {}, { settle: 2000 });
 
   browser.kill('SIGTERM');
-  server.kill('SIGTERM');
+  try {
+    process.kill(-server.pid, 'SIGTERM'); // wrangler and the runtime it started
+  } catch {
+    server.kill('SIGTERM');
+  }
   return failures;
 }
 
-if (!fs.existsSync(bin)) {
-  console.error(`Build first: ${bin} is missing (make build).`);
+if (!fs.existsSync(path.join(root, 'web', 'dist', 'index.html')) || !fs.existsSync(wrangler)) {
+  console.error('Build first: npm install && npm run build (or run npm run test:ui).');
   process.exit(2);
 }
 const all = [];
